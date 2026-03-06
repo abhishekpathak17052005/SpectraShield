@@ -43,6 +43,24 @@ const AppContent = () => {
     return match ? match[0] : null;
   };
 
+  const getDeepLinkParams = (): URLSearchParams => {
+    const searchParams = new URLSearchParams(window.location.search || "");
+    if (["email_text", "email_header", "url", "sender_email"].some((key) => !!searchParams.get(key))) {
+      return searchParams;
+    }
+
+    const hash = window.location.hash || "";
+    if (!hash) return searchParams;
+
+    const queryStart = hash.indexOf("?");
+    if (queryStart >= 0) {
+      return new URLSearchParams(hash.slice(queryStart + 1));
+    }
+
+    const cleaned = hash.startsWith("#") ? hash.slice(1) : hash;
+    return new URLSearchParams(cleaned);
+  };
+
   const runAnalysis = (payload: { email_text: string; email_header?: string; url?: string; sender_email?: string; private_mode: boolean }) => {
     setLoading(true);
     analyzeEmail({
@@ -66,7 +84,7 @@ const AppContent = () => {
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = getDeepLinkParams();
     const qEmailText = params.get("email_text");
     const qHeader = params.get("email_header");
     const qUrl = params.get("url");

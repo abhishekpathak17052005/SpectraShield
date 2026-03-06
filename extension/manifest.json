@@ -6,18 +6,39 @@
   "permissions": [],
   "host_permissions": [
     "http://localhost:8000/*",
-    "https://mail.google.com/*"
+    "https://mail.google.com/*",
+    "https://www.linkedin.com/*",
+    "*://*.linkedin.com/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "SpectraShield - Scan email"
   },
   "content_scripts": [
     {
-      "matches": ["https://mail.google.com/*"],
+      "matches": [
+        "https://mail.google.com/*",
+        "https://www.linkedin.com/messaging/*",
+        "*://*.linkedin.com/*"
+      ],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content.css",
+        "popup.css"
+      ],
+      "matches": [
+        "*://*.linkedin.com/*",
+        "https://mail.google.com/*"
+      ]
     }
   ]
 }

@@ -6,9 +6,13 @@ client = MongoClient("mongodb://localhost:27017/")
 # Create / use database
 db = client["spectrashield_db"]
 
-# Create / use collection
-scan_collection = db["scan_history"]
-scan_collection.create_index([("thread_id", ASCENDING)])
+# Create / use collection (primary)
+scans_collection = db["scans"]
+scans_collection.create_index([("thread_id", ASCENDING)])
+scans_collection.create_index([("linkedin_thread_id", ASCENDING)], unique=True, sparse=True)
+
+# Backward-compatible alias used by older modules
+scan_collection = scans_collection
 
 # Threat intelligence feed (OpenPhish) – URL is unique key
 threat_feed_collection = db["threat_feed"]

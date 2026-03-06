@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Literal, Optional
+from typing import Any, Iterable, Literal, Optional
 from urllib.parse import urlparse
 import os
 import base64
@@ -46,6 +46,24 @@ DEFAULT_PROTECTED_BRANDS = [
     "facebook",
     "linkedin",
 ]
+
+LINKEDIN_TRUSTED_DOMAINS = {
+    "linkedin.com",
+    "lnkd.in",
+}
+
+MICROSOFT_TRUSTED_DOMAINS = {
+    "microsoft.com",
+    "office.com",
+    "live.com",
+    "outlook.com",
+}
+
+GENERIC_HR_LABELS = {
+    "hr portal",
+    "human resources",
+    "career portal",
+}
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -473,6 +491,214 @@ def compute_mail_severity(url_findings: list[dict]) -> dict:
         "suspicious_links": suspicious_links,
         "safe_links": safe_links,
         "summary_reason": reason,
+    }
+
+
+def _host_matches_domain(hostname: str, trusted_domains: set[str]) -> bool:
+    host = (hostname or "").lower()
+    if not host:
+        return False
+    for domain in trusted_domains:
+        if host == domain or host.endswith(f".{domain}"):
+            return True
+    return False
+
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def _sentence_starts(text: str) -> list[str]:
+    raw_sentences = re.split(r"[.!?]+", text or "")
+    starts: list[str] = []
+    for sentence in raw_sentences:
+        words = [w for w in re.findall(r"[a-zA-Z']+", sentence.lower()) if w]
+        if not words:
+            continue
+        starts.append(" ".join(words[:3]))
+    return starts
+
+
+def _ai_heuristics_flags(text: str) -> tuple[float, list[str]]:
+    normalized = _normalize_whitespace(text)
+    lower_text = normalized.lower()
+    flags: list[str] = []
+
+    formal_patterns = [
+        r"\bdear\s+(sir|madam|candidate|professional)\b",
+        r"\bkindly\b",
+        r"\bplease be informed\b",
+        r"\bi hope this message finds you well\b",
+    ]
+    if any(re.search(pattern, lower_text) for pattern in formal_patterns):
+        flags.append("Overly formal phrasing")
+
+    professional_hooks = [
+        "i came across your profile",
+        "great fit for your background",
+        "exciting opportunity",
+        "let us connect",
+        "quick chat",
+        "career growth opportunity",
+    ]
+    matched_hooks = [hook for hook in professional_hooks if hook in lower_text]
+    if matched_hooks:
+        flags.append("Generic professional hooks")
+
+    starts = _sentence_starts(normalized)
+    repeated_starts = len(starts) != len(set(starts)) and len(starts) >= 3
+    if repeated_starts:
+        flags.append("Repetitive sentence structure")
+
+    repeated_chunks = re.findall(r"(\b\w+(?:\s+\w+){1,4}\b)(?:.*\1){1,}", lower_text)
+    if repeated_chunks:
+        flags.append("Repeated phrase pattern")
+
+    score = min(100.0, 20.0 + (18.0 * len(flags))) if normalized else 0.0
+    return float(round(score, 2)), flags
+
+
+def _check_link_text_mismatch(link_text: str, href: str) -> tuple[bool, str]:
+    text = _normalize_whitespace(link_text).lower()
+    destination = (href or "").strip()
+    host = _hostname_from_url(destination)
+
+    if not text or not destination:
+        return False, ""
+
+    embedded_url_match = re.search(r"([a-z0-9-]+\.)+[a-z]{2,}", text)
+    if embedded_url_match:
+        displayed_domain = embedded_url_match.group(0)
+        if displayed_domain not in host and _levenshtein(displayed_domain, host[: len(displayed_domain)]) > 2:
+            return True, f"Displayed domain '{displayed_domain}' differs from destination '{host}'."
+
+    if any(label in text for label in ["update profile", "verify account", "secure login", "job portal"]):
+        trusted = host.endswith("linkedin.com") or host.endswith("microsoft.com")
+        if not trusted:
+            return True, f"Action text '{text[:48]}' points to non-trusted domain '{host}'."
+
+    tokenized = set(re.findall(r"[a-z0-9]{3,}", text))
+    host_tokens = set(re.findall(r"[a-z0-9]{3,}", host.replace("-", " ")))
+    if tokenized and host_tokens:
+        overlap = len(tokenized.intersection(host_tokens))
+        similarity_ratio = overlap / max(len(tokenized), 1)
+        if similarity_ratio < 0.2 and len(tokenized) >= 2:
+            return True, f"Link text and destination '{host}' have weak lexical match."
+
+    return False, ""
+
+
+def _brand_impersonation_flags(link_text: str, href: str) -> list[str]:
+    flags: list[str] = []
+    text = _normalize_whitespace(link_text).lower()
+    host = _hostname_from_url(href or "")
+
+    if not host:
+        return flags
+
+    mentions_linkedin = "linkedin" in text or "linkedin" in host
+    if mentions_linkedin and not _host_matches_domain(host, LINKEDIN_TRUSTED_DOMAINS):
+        flags.append(f"Potential LinkedIn impersonation via domain '{host}'.")
+
+    mentions_microsoft = "microsoft" in text or "office" in text or "outlook" in text
+    if mentions_microsoft and not _host_matches_domain(host, MICROSOFT_TRUSTED_DOMAINS):
+        flags.append(f"Potential Microsoft impersonation via domain '{host}'.")
+
+    mentions_hr = any(label in text for label in GENERIC_HR_LABELS) or ("hr" in host and "portal" in host)
+    if mentions_hr:
+        suspicious_hr = any(host.endswith(tld) for tld in [".top", ".xyz", ".info", ".click", ".site"])
+        if suspicious_hr or host.count("-") >= 2:
+            flags.append(f"Potential HR portal impersonation via domain '{host}'.")
+
+    return flags
+
+
+def analyze_linkedin_message(message_text: str, links: list[dict[str, Any]]) -> dict:
+    normalized_text = _normalize_whitespace(message_text)
+    unique_links: list[dict[str, str]] = []
+    seen_links: set[tuple[str, str]] = set()
+
+    for raw in links or []:
+        href = str((raw or {}).get("href") or "").strip()
+        text = _normalize_whitespace(str((raw or {}).get("text") or ""))
+        if not href:
+            continue
+        key = (text.lower(), href.lower())
+        if key in seen_links:
+            continue
+        seen_links.add(key)
+        unique_links.append({"text": text, "href": href})
+
+    ai_likelihood, ai_flags = _ai_heuristics_flags(normalized_text)
+
+    manipulation_flags: list[str] = []
+    brand_flags: list[str] = []
+    mismatched_links: list[dict[str, str]] = []
+
+    for item in unique_links:
+        mismatch, reason = _check_link_text_mismatch(item.get("text", ""), item.get("href", ""))
+        if mismatch:
+            mismatched_links.append(
+                {
+                    "text": item.get("text", ""),
+                    "href": item.get("href", ""),
+                    "reason": reason,
+                }
+            )
+            manipulation_flags.append(reason)
+
+        brand_hits = _brand_impersonation_flags(item.get("text", ""), item.get("href", ""))
+        if brand_hits:
+            brand_flags.extend(brand_hits)
+
+    # Risk fusion tuned for LinkedIn messaging context
+    manipulation_score = min(100.0, 20.0 * len(mismatched_links) + (10.0 if manipulation_flags else 0.0))
+    brand_score = min(100.0, 25.0 * len(set(brand_flags)))
+    fused_score = min(100.0, (0.45 * ai_likelihood) + (0.35 * manipulation_score) + (0.20 * brand_score))
+    final_score = round(float(fused_score), 2)
+
+    if final_score < 30:
+        level = "Safe"
+    elif final_score <= 70:
+        level = "Moderate"
+    else:
+        level = "Hard"
+
+    brand_safety = "Clear"
+    if brand_flags:
+        brand_safety = "Potential Impersonation"
+
+    summary_parts = []
+    if ai_flags:
+        summary_parts.append("AI-like writing cues detected")
+    if mismatched_links:
+        summary_parts.append(f"{len(mismatched_links)} mismatched link pattern(s)")
+    if brand_flags:
+        summary_parts.append("brand impersonation indicators found")
+    if not summary_parts:
+        summary_parts.append("No strong manipulation indicators found")
+
+    return {
+        "final_risk": final_score,
+        "final_score": final_score,
+        "level": level,
+        "reasoning_summary": "; ".join(summary_parts) + ".",
+        "linkedin_sentinel": {
+            "ai_likelihood": round(ai_likelihood, 2),
+            "ai_flags": ai_flags,
+            "manipulation_flags": list(dict.fromkeys(manipulation_flags)),
+            "mismatched_links": mismatched_links,
+            "brand_flags": list(dict.fromkeys(brand_flags)),
+            "brand_safety": brand_safety,
+            "analyzed_link_count": len(unique_links),
+        },
+        "risk_breakdown": {
+            "ai_likelihood": round(ai_likelihood, 2),
+            "manipulation_score": round(manipulation_score, 2),
+            "brand_impersonation_score": round(brand_score, 2),
+            "manipulation_flags": list(dict.fromkeys(manipulation_flags)),
+            "brand_safety": brand_safety,
+        },
     }
 
 

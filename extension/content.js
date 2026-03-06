@@ -21,6 +21,38 @@
   var openMailCache = {};
   var openMailInFlight = new Set();
   var openMailSignatureByThread = {};
+  var linkedinProcessedMessages = new WeakSet();
+  var linkedinThreadMessageCache = {};
+  var linkedinAssetCache = {};
+  var linkedinWarnedNoThreadId = false;
+  var linkedinLastScanLogAt = 0;
+  var linkedinBackgroundObserverStarted = false;
+  var linkedinProcessedKeys = new Set();
+  var linkedinSignatureByKey = {};
+  var linkedinInFlightByKey = {};
+
+  var LINKEDIN_MESSAGE_CONTAINER_SELECTORS = [
+    '.msg-s-message-list',
+    '.msg-s-message-list-content',
+    '[data-view-name="messages-list"]',
+    '.msg-conversation-listitem__event-list'
+  ];
+
+  var LINKEDIN_BUBBLE_SELECTORS = [
+    'div.msg-s-event-listitem__body',
+    'li.msg-s-message-list__event',
+    '.msg-s-event-listitem'
+  ];
+
+  function stableHash(input) {
+    var text = String(input || '');
+    var hash = 0;
+    for (var i = 0; i < text.length; i++) {
+      hash = ((hash << 5) - hash) + text.charCodeAt(i);
+      hash |= 0;
+    }
+    return String(Math.abs(hash));
+  }
 
   // ---- Link-level (zero-touch) scanning ----
   var linkProcessed = new WeakSet();
@@ -546,6 +578,84 @@
     });
   }
 
+  function getExtensionAssetUrl(path) {
+    if (!path) return '';
+    if (linkedinAssetCache[path]) return linkedinAssetCache[path];
+    var resolved = '';
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+        resolved = chrome.runtime.getURL(path);
+      }
+    } catch (_) {}
+    linkedinAssetCache[path] = resolved;
+    return resolved;
+  }
+
+  function isValidExtensionAssetUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (url.indexOf('chrome-extension://') !== 0) return false;
+    if (url.indexOf('chrome-extension://invalid/') === 0) return false;
+    return true;
+  }
+
+  function analyzeLinkedInViaBackground(payload) {
+    return new Promise(function (resolve, reject) {
+      try {
+        if (!(chrome && chrome.runtime && chrome.runtime.sendMessage)) {
+          reject(new Error('runtime messaging unavailable'));
+          return;
+        }
+      } catch (_) {
+        reject(new Error('runtime messaging unavailable'));
+        return;
+      }
+
+      chrome.runtime.sendMessage(
+        {
+          type: 'SPECTRASHIELD_LINKEDIN_ANALYZE',
+          payload: payload
+        },
+        function (response) {
+          var runtimeError = chrome && chrome.runtime ? chrome.runtime.lastError : null;
+          if (runtimeError) {
+            reject(new Error(runtimeError.message || 'background messaging failed'));
+            return;
+          }
+          if (!response || response.ok !== true) {
+            reject(new Error((response && response.error) || 'analysis failed'));
+            return;
+          }
+          resolve(response.data);
+        }
+      );
+    });
+  }
+
+  function pingLinkedInBridge() {
+    try {
+      if (!(chrome && chrome.runtime && chrome.runtime.sendMessage)) {
+        console.warn('[SpectraShield][LinkedIn] runtime messaging unavailable at ping stage');
+        return;
+      }
+    } catch (_) {
+      console.warn('[SpectraShield][LinkedIn] runtime messaging unavailable at ping stage');
+      return;
+    }
+
+    chrome.runtime.sendMessage({ type: 'SPECTRASHIELD_PING' }, function (response) {
+      var runtimeError = chrome && chrome.runtime ? chrome.runtime.lastError : null;
+      if (runtimeError) {
+        console.warn('[SpectraShield][LinkedIn] bridge ping failed:', runtimeError.message || runtimeError);
+        return;
+      }
+      if (!response || !response.ok) {
+        console.warn('[SpectraShield][LinkedIn] bridge ping negative response');
+        return;
+      }
+      console.log('[SpectraShield][LinkedIn] bridge ping success');
+    });
+  }
+
   function riskLevel(finalRisk) {
     if (finalRisk >= 70) return 'high';
     if (finalRisk >= 30) return 'suspicious';
@@ -558,7 +668,7 @@
     if (entry.emailText) params.set('email_text', entry.emailText);
     if (entry.senderEmail) params.set('sender_email', entry.senderEmail);
     if (entry.urls && entry.urls.length > 0) params.set('url', entry.urls[0]);
-    var url = 'http://localhost:5173/?' + params.toString();
+    var url = 'http://localhost:5173/#spectra?' + params.toString();
     try {
       window.open(url, '_blank');
     } catch (_) { }
@@ -770,6 +880,510 @@
     }, 2500);
   }
 
+  function getLinkedInThreadId() {
+    var href = window.location.href || '';
+    var urnMatch = href.match(/messagingThread%3A([^&#/]+)/i);
+    if (urnMatch && urnMatch[1]) return urnMatch[1];
+
+    var pathMatch = href.match(/\/messaging\/thread\/([^/?#]+)/i);
+    if (pathMatch && pathMatch[1]) return pathMatch[1];
+
+    try {
+      var parsed = new URL(href);
+      var current = parsed.searchParams.get('currentConversationUrn') || '';
+      var normalized = decodeURIComponent(current);
+      var normalizedMatch = normalized.match(/messagingThread:([^,\)]+)/i);
+      if (normalizedMatch && normalizedMatch[1]) return normalizedMatch[1];
+
+      var pathToken = (parsed.pathname || '').match(/\/messaging\/thread\/([^/?#]+)/i);
+      if (pathToken && pathToken[1]) return pathToken[1];
+    } catch (_) {}
+
+    return null;
+  }
+
+  function linkedinRiskLevel(score) {
+    if (score > 70) return 'Hard';
+    if (score >= 31) return 'Moderate';
+    return 'Safe';
+  }
+
+  function linkedinBadgeColor(level) {
+    if (level === 'Safe') return '#17a34a';
+    if (level === 'Moderate') return '#d29c00';
+    return '#dc2626';
+  }
+
+  function getLinkedInStableAnchor(messageNode) {
+    if (!messageNode) return null;
+    var eventLi = messageNode.closest('li.msg-s-message-list__event');
+    if (eventLi) return eventLi;
+    var group = messageNode.closest('.msg-s-message-group');
+    if (group) return group;
+    var eventItem = messageNode.closest('.msg-s-event-listitem');
+    if (eventItem) return eventItem;
+    var groupItem = messageNode.closest('li.msg-s-message-list__event');
+    if (groupItem) return groupItem;
+    return messageNode;
+  }
+
+  function getLinkedInMessageKey(threadId, messageNode, messageText) {
+    var stableRoot = getLinkedInStableAnchor(messageNode);
+    if (!stableRoot) return null;
+
+    var existing = stableRoot.getAttribute('data-spectra-linkedin-key');
+    if (existing) return existing;
+
+    var rootText = (stableRoot.innerText || '').trim().slice(0, 220);
+    var domIdentity =
+      stableRoot.getAttribute('data-urn') ||
+      stableRoot.getAttribute('data-id') ||
+      stableRoot.getAttribute('id') ||
+      '';
+    var key = 'li-' + stableHash([threadId || '', domIdentity, messageText || '', rootText].join('|'));
+    stableRoot.setAttribute('data-spectra-linkedin-key', key);
+    return key;
+  }
+
+  function ensureLinkedInShadowBadge(targetNode, riskData) {
+    if (!targetNode || !riskData) return;
+
+    var stableRoot = getLinkedInStableAnchor(targetNode);
+    if (!stableRoot) return;
+
+    var existingHosts = stableRoot.querySelectorAll('[data-spectrashield-linkedin-pill]');
+    for (var h = 1; h < existingHosts.length; h++) {
+      existingHosts[h].remove();
+    }
+
+    var host = existingHosts.length ? existingHosts[0] : null;
+    if (!host) {
+      host = document.createElement('span');
+      host.setAttribute('data-spectrashield-linkedin-pill', 'true');
+      host.style.marginLeft = '8px';
+      host.style.verticalAlign = 'middle';
+
+      var attachTarget =
+        stableRoot.querySelector('.msg-s-message-group__meta') ||
+        stableRoot.querySelector('time') ||
+        stableRoot;
+
+      if (attachTarget && attachTarget.parentNode) {
+        attachTarget.parentNode.insertBefore(host, attachTarget.nextSibling);
+      } else if (stableRoot.insertBefore) {
+        stableRoot.insertBefore(host, stableRoot.firstChild);
+      }
+    }
+
+    host._spectraContext = riskData && riskData.context ? riskData.context : null;
+    var isLoading = !!(riskData && riskData.loading);
+
+    var root = host.shadowRoot || host.attachShadow({ mode: 'open' });
+
+    var cssUrl = getExtensionAssetUrl('content.css');
+    if (isValidExtensionAssetUrl(cssUrl) && !root.querySelector('link[data-spectrashield-shadow-css]')) {
+      var linkEl = document.createElement('link');
+      linkEl.setAttribute('rel', 'stylesheet');
+      linkEl.setAttribute('href', cssUrl);
+      linkEl.setAttribute('data-spectrashield-shadow-css', '1');
+      root.appendChild(linkEl);
+    }
+
+    var style = root.querySelector('style[data-spectrashield-inline-style]');
+    if (!style) {
+      style = document.createElement('style');
+      style.setAttribute('data-spectrashield-inline-style', '1');
+      style.textContent =
+        '.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;line-height:16px;cursor:default;position:relative;color:#fff;}' +
+        '.tooltip{display:none;position:absolute;left:50%;bottom:120%;transform:translateX(-50%);min-width:220px;max-width:280px;padding:8px 10px;border-radius:8px;font-size:11px;line-height:1.45;color:#111827;background:#ffffff;border:1px solid rgba(17,24,39,.14);box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:9999;}' +
+        '.pill:hover .tooltip{display:block;}' +
+        '.row{display:flex;justify-content:space-between;gap:8px;margin:2px 0;}' +
+        '.label{font-weight:600;color:#374151;}' +
+        '.value{font-weight:500;color:#111827;text-align:right;}';
+      root.appendChild(style);
+    }
+
+    var pill = root.querySelector('.pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.style.cursor = 'pointer';
+      pill.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (host._spectraLoading) return;
+        var context = host._spectraContext;
+        if (context) {
+          openSpectraShieldAnalysis(context);
+        }
+      });
+
+      var tooltip = document.createElement('div');
+      tooltip.className = 'tooltip';
+      tooltip.innerHTML =
+        '<div class="row"><span class="label">AI Likelihood</span><span class="value" data-spectra-ai>0%</span></div>' +
+        '<div class="row"><span class="label">Manipulation Flags</span><span class="value" data-spectra-manip>0</span></div>' +
+        '<div class="row"><span class="label">Brand Safety</span><span class="value" data-spectra-brand>Unknown</span></div>';
+
+      pill.appendChild(tooltip);
+      root.appendChild(pill);
+    }
+
+    host._spectraLoading = isLoading;
+    pill.style.cursor = isLoading ? 'wait' : 'pointer';
+    pill.style.background = isLoading ? '#6b7280' : riskData.color;
+    var pillText = isLoading ? 'Scanning...' : (riskData.score + '% ' + riskData.level);
+    if (pill.firstChild && pill.firstChild.nodeType === 3) {
+      pill.firstChild.nodeValue = pillText;
+    } else {
+      pill.insertBefore(document.createTextNode(pillText), pill.firstChild);
+    }
+
+    var aiNode = root.querySelector('[data-spectra-ai]');
+    if (aiNode) aiNode.textContent = isLoading ? 'Analyzing...' : (riskData.aiLikelihood + '%');
+    var manipNode = root.querySelector('[data-spectra-manip]');
+    if (manipNode) manipNode.textContent = isLoading ? 'VirusTotal...' : String(riskData.manipulationFlags);
+    var brandNode = root.querySelector('[data-spectra-brand]');
+    if (brandNode) brandNode.textContent = isLoading ? 'Link verification in progress' : riskData.brandSafety;
+  }
+
+  function extractLinkedInLinks(messageNode) {
+    function isSkippableLinkedInHref(href) {
+      if (!href) return true;
+      var raw = String(href).trim();
+      if (!raw) return true;
+      if (/^(mailto:|javascript:|#)/i.test(raw)) return true;
+
+      var parsed;
+      try {
+        parsed = new URL(raw, window.location.origin);
+      } catch (_) {
+        return true;
+      }
+
+      var host = (parsed.hostname || '').toLowerCase();
+      var path = (parsed.pathname || '').toLowerCase();
+
+      var isLinkedInHost =
+        host === 'linkedin.com' ||
+        host === 'www.linkedin.com' ||
+        host.endsWith('.linkedin.com');
+
+      if (!isLinkedInHost) {
+        return parsed.protocol !== 'http:' && parsed.protocol !== 'https:';
+      }
+
+      // Skip internal/profile/navigation links; keep only sender-shared external links.
+      if (
+        path.indexOf('/in/') === 0 ||
+        path.indexOf('/company/') === 0 ||
+        path.indexOf('/school/') === 0 ||
+        path.indexOf('/pub/') === 0 ||
+        path.indexOf('/feed/') === 0 ||
+        path.indexOf('/messaging/') === 0 ||
+        path.indexOf('/posts/') === 0 ||
+        path.indexOf('/groups/') === 0 ||
+        path.indexOf('/jobs/') === 0
+      ) {
+        return true;
+      }
+
+      return true;
+    }
+
+    var out = [];
+    if (!messageNode || !messageNode.querySelectorAll) return out;
+
+    var linkRoot =
+      messageNode.querySelector('.msg-s-event-listitem__body') ||
+      messageNode.querySelector('.msg-s-event-listitem__message-bubble') ||
+      messageNode.querySelector('.msg-s-message-group__message-bubble') ||
+      messageNode;
+
+    var anchors = linkRoot.querySelectorAll('a[href]');
+    for (var i = 0; i < anchors.length; i++) {
+      var a = anchors[i];
+      var href = a.getAttribute('href') || '';
+      if (!href) continue;
+      if (isSkippableLinkedInHref(href)) continue;
+      out.push({
+        text: (a.innerText || a.textContent || '').trim(),
+        href: href
+      });
+    }
+    return out;
+  }
+
+  function extractLinkedInMessageText(messageNode) {
+    if (!messageNode) return '';
+
+    var candidateSelectors = [
+      '.msg-s-event-listitem__body',
+      '.msg-s-message-group__message-bubble',
+      '.msg-s-event-listitem__message-bubble',
+      '.msg-s-event-listitem__message-bubble-container',
+      '[data-view-name="message-list-item"]'
+    ];
+
+    for (var i = 0; i < candidateSelectors.length; i++) {
+      var found = messageNode.querySelector(candidateSelectors[i]);
+      if (found) {
+        var text = (found.innerText || found.textContent || '').trim();
+        if (text) return text;
+      }
+    }
+
+    return (messageNode.innerText || messageNode.textContent || '').trim();
+  }
+
+  function analyzeLinkedInMessage(messageNode) {
+    if (!messageNode || linkedinProcessedMessages.has(messageNode)) return;
+
+    var threadId = getLinkedInThreadId();
+    if (!threadId) {
+      threadId = 'thread-' + btoa((window.location.pathname || 'linkedin').slice(0, 120));
+      if (!linkedinWarnedNoThreadId) {
+        linkedinWarnedNoThreadId = true;
+        try {
+          console.warn('[SpectraShield][LinkedIn] unable to parse native thread id; using fallback key');
+        } catch (_) {}
+      }
+    }
+
+    var messageText = extractLinkedInMessageText(messageNode);
+    if (!messageText) return;
+
+    var messageKey = getLinkedInMessageKey(threadId, messageNode, messageText);
+    if (!messageKey) return;
+
+    if (linkedinInFlightByKey[messageKey]) {
+      linkedinProcessedMessages.add(messageNode);
+      return;
+    }
+
+    var links = extractLinkedInLinks(messageNode);
+    var signature = [threadId, messageKey, messageText.slice(0, 180), links.map(function (l) { return l.href; }).join('|')].join('|');
+
+    if (linkedinSignatureByKey[messageKey] === signature && linkedinThreadMessageCache[messageKey]) {
+      ensureLinkedInShadowBadge(messageNode, linkedinThreadMessageCache[messageKey]);
+      linkedinProcessedMessages.add(messageNode);
+      linkedinProcessedKeys.add(messageKey);
+      return;
+    }
+
+    if (linkedinProcessedKeys.has(messageKey) && linkedinThreadMessageCache[messageKey]) {
+      ensureLinkedInShadowBadge(messageNode, linkedinThreadMessageCache[messageKey]);
+      linkedinProcessedMessages.add(messageNode);
+      return;
+    }
+
+    if (links.length > 0) {
+      ensureLinkedInShadowBadge(messageNode, {
+        loading: true,
+        score: 0,
+        level: 'Scanning',
+        color: '#6b7280',
+        aiLikelihood: 0,
+        manipulationFlags: 0,
+        brandSafety: 'Link verification in progress',
+        context: {
+          emailText: messageText,
+          senderEmail: '',
+          urls: links.map(function (l) { return l.href; })
+        }
+      });
+    }
+
+    linkedinInFlightByKey[messageKey] = true;
+
+    analyzeLinkedInViaBackground({
+      email_text: messageText,
+      email_header: null,
+      url: links.length > 0 ? links[0].href : null,
+      urls: links.map(function (l) { return l.href; }),
+      sender_email: null,
+      platform: 'linkedin',
+      thread_id: threadId,
+      link_pairs: links,
+      private_mode: true
+    }).then(function (resp) {
+      var scoreRaw = typeof resp.final_risk === 'number' ? resp.final_risk :
+        (typeof resp.final_score === 'number' ? resp.final_score : 0);
+      var score = Math.round(scoreRaw || 0);
+      var level = resp.level || linkedinRiskLevel(score);
+      var sentinel = resp.linkedin_sentinel || {};
+      var manipulationFlags = sentinel.manipulation_flags && sentinel.manipulation_flags.length
+        ? sentinel.manipulation_flags.length
+        : 0;
+
+      var riskData = {
+        score: score,
+        level: level,
+        color: linkedinBadgeColor(level),
+        aiLikelihood: Math.round(typeof sentinel.ai_likelihood === 'number' ? sentinel.ai_likelihood : 0),
+        manipulationFlags: manipulationFlags,
+        brandSafety: sentinel.brand_safety || 'Clear',
+        context: {
+          emailText: messageText,
+          senderEmail: '',
+          urls: links.map(function (l) { return l.href; })
+        }
+      };
+
+      linkedinThreadMessageCache[messageKey] = riskData;
+      linkedinSignatureByKey[messageKey] = signature;
+      linkedinProcessedKeys.add(messageKey);
+      ensureLinkedInShadowBadge(messageNode, riskData);
+      linkedinProcessedMessages.add(messageNode);
+    }).catch(function (err) {
+      try {
+        console.warn('[SpectraShield][LinkedIn] background analyze failed:', (err && err.message) ? err.message : err);
+      } catch (_) {}
+      var fallback = {
+        score: 35,
+        level: 'Moderate',
+        color: linkedinBadgeColor('Moderate'),
+        aiLikelihood: 0,
+        manipulationFlags: 0,
+        brandSafety: 'Unknown',
+        context: {
+          emailText: messageText,
+          senderEmail: '',
+          urls: links.map(function (l) { return l.href; })
+        }
+      };
+      linkedinThreadMessageCache[messageKey] = fallback;
+      linkedinSignatureByKey[messageKey] = signature;
+      linkedinProcessedKeys.add(messageKey);
+      ensureLinkedInShadowBadge(messageNode, fallback);
+      linkedinProcessedMessages.add(messageNode);
+    }).finally(function () {
+      delete linkedinInFlightByKey[messageKey];
+    });
+  }
+
+  function processLinkedInMessages(root) {
+    var scope = root || document;
+    var bubbles = [];
+    var seenNodes = new Set();
+
+    for (var i = 0; i < LINKEDIN_BUBBLE_SELECTORS.length; i++) {
+      var selector = LINKEDIN_BUBBLE_SELECTORS[i];
+      if (scope.matches && scope.matches(selector)) {
+        if (!seenNodes.has(scope)) {
+          seenNodes.add(scope);
+          bubbles.push(scope);
+        }
+      }
+    }
+
+    if (scope.querySelectorAll) {
+      for (var j = 0; j < LINKEDIN_BUBBLE_SELECTORS.length; j++) {
+        var found = scope.querySelectorAll(LINKEDIN_BUBBLE_SELECTORS[j]);
+        for (var k = 0; k < found.length; k++) {
+          if (!seenNodes.has(found[k])) {
+            seenNodes.add(found[k]);
+            bubbles.push(found[k]);
+          }
+        }
+      }
+    }
+
+    var now = Date.now();
+    if (now - linkedinLastScanLogAt > 5000) {
+      linkedinLastScanLogAt = now;
+      try {
+        console.log('[SpectraShield][LinkedIn] scan candidates:', bubbles.length);
+      } catch (_) {}
+    }
+
+    for (var m = 0; m < bubbles.length; m++) {
+      analyzeLinkedInMessage(bubbles[m]);
+    }
+  }
+
+  function findLinkedInMessageContainer() {
+    for (var i = 0; i < LINKEDIN_MESSAGE_CONTAINER_SELECTORS.length; i++) {
+      var container = document.querySelector(LINKEDIN_MESSAGE_CONTAINER_SELECTORS[i]);
+      if (container) return container;
+    }
+    return null;
+  }
+
+  function startLinkedInFallbackObserver() {
+    if (linkedinBackgroundObserverStarted) return;
+    linkedinBackgroundObserverStarted = true;
+
+    var bodyObserver = new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        for (var j = 0; j < mutations[i].addedNodes.length; j++) {
+          var node = mutations[i].addedNodes[j];
+          if (!node || node.nodeType !== 1) continue;
+          processLinkedInMessages(node);
+        }
+      }
+    });
+
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    setInterval(function () {
+      if (document.visibilityState !== 'visible') return;
+      processLinkedInMessages(document);
+    }, 3000);
+
+    try {
+      console.log('[SpectraShield][LinkedIn] fallback observer active');
+    } catch (_) {}
+  }
+
+  function startLinkedInObserver() {
+    console.log('[SpectraShield][LinkedIn] starting observer');
+
+    var tryAttach = function () {
+      var container = findLinkedInMessageContainer();
+      if (!container) {
+        return false;
+      }
+
+      if (container.getAttribute('data-spectrashield-observer') === '1') {
+        processLinkedInMessages(container);
+        return true;
+      }
+
+      container.setAttribute('data-spectrashield-observer', '1');
+
+      processLinkedInMessages(container);
+
+      var observer = new MutationObserver(function (mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          for (var j = 0; j < mutations[i].addedNodes.length; j++) {
+            var node = mutations[i].addedNodes[j];
+            if (!node || node.nodeType !== 1) continue;
+            processLinkedInMessages(node);
+          }
+        }
+      });
+
+      observer.observe(container, { childList: true, subtree: true });
+      console.log('[SpectraShield][LinkedIn] observer attached');
+      return true;
+    };
+
+    if (tryAttach()) return;
+
+    var attachTimer = setInterval(function () {
+      if (tryAttach()) clearInterval(attachTimer);
+    }, 1000);
+
+    setTimeout(function () {
+      clearInterval(attachTimer);
+      if (!findLinkedInMessageContainer()) {
+        console.warn('[SpectraShield][LinkedIn] message list container not found after wait; fallback observer will continue');
+      }
+    }, 30000);
+
+    startLinkedInFallbackObserver();
+  }
+
   function waitForGmail() {
     if (document.querySelector('[role="main"]') || document.querySelector('tr.zA')) {
       start();
@@ -785,8 +1399,24 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', waitForGmail);
+    document.addEventListener('DOMContentLoaded', function () {
+      var host = window.location.hostname || '';
+      if (host.indexOf('mail.google.com') !== -1) {
+        waitForGmail();
+        return;
+      }
+      if (host.indexOf('linkedin.com') !== -1 && window.location.href.indexOf('/messaging') !== -1) {
+        pingLinkedInBridge();
+        startLinkedInObserver();
+      }
+    });
   } else {
-    waitForGmail();
+    var host = window.location.hostname || '';
+    if (host.indexOf('mail.google.com') !== -1) {
+      waitForGmail();
+    } else if (host.indexOf('linkedin.com') !== -1 && window.location.href.indexOf('/messaging') !== -1) {
+      pingLinkedInBridge();
+      startLinkedInObserver();
+    }
   }
 })();
