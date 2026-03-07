@@ -945,6 +945,65 @@
     return key;
   }
 
+  function showLinkedInFloatingTooltip(host, pill) {
+    if (!host || !pill) return;
+    var data = host._spectraTooltipData || {};
+
+    hideLinkedInFloatingTooltip(host);
+
+    var tooltip = document.createElement('div');
+    tooltip.className = 'spectra-linkedin-floating-tooltip';
+    tooltip.style.position = 'fixed';
+    tooltip.style.minWidth = '220px';
+    tooltip.style.maxWidth = '300px';
+    tooltip.style.padding = '8px 10px';
+    tooltip.style.borderRadius = '8px';
+    tooltip.style.fontSize = '12px';
+    tooltip.style.lineHeight = '1.45';
+    tooltip.style.color = '#111827';
+    tooltip.style.background = '#ffffff';
+    tooltip.style.border = '1px solid rgba(17,24,39,.14)';
+    tooltip.style.boxShadow = '0 10px 28px rgba(0,0,0,.18)';
+    tooltip.style.zIndex = '2147483647';
+    tooltip.style.pointerEvents = 'none';
+    tooltip.innerHTML =
+      '<div style="display:flex;justify-content:space-between;gap:8px;margin:2px 0;"><span style="font-weight:600;color:#374151;">AI Likelihood</span><span style="font-weight:500;">' + (data.aiText || '0%') + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;margin:2px 0;"><span style="font-weight:600;color:#374151;">Manipulation Flags</span><span style="font-weight:500;">' + (data.manipText || '0') + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;margin:2px 0;"><span style="font-weight:600;color:#374151;">Brand Safety</span><span style="font-weight:500;text-align:right;">' + (data.brandText || 'Unknown') + '</span></div>';
+
+    document.body.appendChild(tooltip);
+
+    var rect = pill.getBoundingClientRect();
+    var left = rect.left + rect.width / 2;
+    var top = rect.top - 10;
+
+    // Initial position above badge, then clamp to viewport.
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+    tooltip.style.transform = 'translate(-50%, -100%)';
+
+    var ttRect = tooltip.getBoundingClientRect();
+    var clampedLeft = Math.min(
+      window.innerWidth - ttRect.width - 8,
+      Math.max(8, rect.left + (rect.width / 2) - (ttRect.width / 2))
+    );
+    var clampedTop = rect.top - ttRect.height - 10;
+    if (clampedTop < 8) {
+      clampedTop = rect.bottom + 10;
+    }
+    tooltip.style.left = clampedLeft + 'px';
+    tooltip.style.top = clampedTop + 'px';
+    tooltip.style.transform = 'none';
+
+    host._spectraFloatingTooltip = tooltip;
+  }
+
+  function hideLinkedInFloatingTooltip(host) {
+    if (!host || !host._spectraFloatingTooltip) return;
+    host._spectraFloatingTooltip.remove();
+    host._spectraFloatingTooltip = null;
+  }
+
   function ensureLinkedInShadowBadge(targetNode, riskData) {
     if (!targetNode || !riskData) return;
 
@@ -957,21 +1016,29 @@
     }
 
     var host = existingHosts.length ? existingHosts[0] : null;
+    var mountTarget =
+      stableRoot.querySelector('.msg-s-event-listitem__body') ||
+      stableRoot.querySelector('.msg-s-message-group__message-bubble') ||
+      stableRoot.querySelector('.msg-s-event-listitem__message-bubble-container') ||
+      stableRoot.querySelector('.msg-s-event-listitem__message-bubble') ||
+      stableRoot;
+
     if (!host) {
       host = document.createElement('span');
       host.setAttribute('data-spectrashield-linkedin-pill', 'true');
-      host.style.marginLeft = '8px';
-      host.style.verticalAlign = 'middle';
+      host.style.display = 'inline-flex';
+      host.style.float = 'right';
+      host.style.margin = '0 0 8px 8px';
+      host.style.clear = 'both';
+      host.style.position = 'relative';
+      host.style.zIndex = '2';
+    }
 
-      var attachTarget =
-        stableRoot.querySelector('.msg-s-message-group__meta') ||
-        stableRoot.querySelector('time') ||
-        stableRoot;
-
-      if (attachTarget && attachTarget.parentNode) {
-        attachTarget.parentNode.insertBefore(host, attachTarget.nextSibling);
-      } else if (stableRoot.insertBefore) {
-        stableRoot.insertBefore(host, stableRoot.firstChild);
+    if (mountTarget && host.parentNode !== mountTarget) {
+      if (mountTarget.firstChild) {
+        mountTarget.insertBefore(host, mountTarget.firstChild);
+      } else {
+        mountTarget.appendChild(host);
       }
     }
 
@@ -995,11 +1062,7 @@
       style.setAttribute('data-spectrashield-inline-style', '1');
       style.textContent =
         '.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;line-height:16px;cursor:default;position:relative;color:#fff;}' +
-        '.tooltip{display:none;position:absolute;left:50%;bottom:120%;transform:translateX(-50%);min-width:220px;max-width:280px;padding:8px 10px;border-radius:8px;font-size:11px;line-height:1.45;color:#111827;background:#ffffff;border:1px solid rgba(17,24,39,.14);box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:9999;}' +
-        '.pill:hover .tooltip{display:block;}' +
-        '.row{display:flex;justify-content:space-between;gap:8px;margin:2px 0;}' +
-        '.label{font-weight:600;color:#374151;}' +
-        '.value{font-weight:500;color:#111827;text-align:right;}';
+        '.pill:focus{outline:none;}';
       root.appendChild(style);
     }
 
@@ -1017,15 +1080,12 @@
           openSpectraShieldAnalysis(context);
         }
       });
-
-      var tooltip = document.createElement('div');
-      tooltip.className = 'tooltip';
-      tooltip.innerHTML =
-        '<div class="row"><span class="label">AI Likelihood</span><span class="value" data-spectra-ai>0%</span></div>' +
-        '<div class="row"><span class="label">Manipulation Flags</span><span class="value" data-spectra-manip>0</span></div>' +
-        '<div class="row"><span class="label">Brand Safety</span><span class="value" data-spectra-brand>Unknown</span></div>';
-
-      pill.appendChild(tooltip);
+      pill.addEventListener('mouseenter', function () {
+        showLinkedInFloatingTooltip(host, pill);
+      });
+      pill.addEventListener('mouseleave', function () {
+        hideLinkedInFloatingTooltip(host);
+      });
       root.appendChild(pill);
     }
 
@@ -1039,12 +1099,13 @@
       pill.insertBefore(document.createTextNode(pillText), pill.firstChild);
     }
 
-    var aiNode = root.querySelector('[data-spectra-ai]');
-    if (aiNode) aiNode.textContent = isLoading ? 'Analyzing...' : (riskData.aiLikelihood + '%');
-    var manipNode = root.querySelector('[data-spectra-manip]');
-    if (manipNode) manipNode.textContent = isLoading ? 'VirusTotal...' : String(riskData.manipulationFlags);
-    var brandNode = root.querySelector('[data-spectra-brand]');
-    if (brandNode) brandNode.textContent = isLoading ? 'Link verification in progress' : riskData.brandSafety;
+    host._spectraTooltipData = {
+      aiText: isLoading ? 'Analyzing...' : (riskData.aiLikelihood + '%'),
+      manipText: isLoading ? 'VirusTotal...' : String(riskData.manipulationFlags),
+      brandText: isLoading ? 'Link verification in progress' : riskData.brandSafety
+    };
+
+    hideLinkedInFloatingTooltip(host);
   }
 
   function extractLinkedInLinks(messageNode) {

@@ -141,6 +141,202 @@ def _ssl_risk_boost_for_url(url: str) -> tuple[float, bool]:
     return min(40.0, boost), ssl_valid
 
 
+def _domain_age_profile(domain_age_days: Optional[int]) -> dict:
+    if domain_age_days is None:
+        return {
+            "bucket": "unknown",
+            "label": "Unknown",
+            "color": "neutral",
+            "message": "Domain age could not be verified.",
+            "risk_modifier_pct": 0,
+        }
+
+    days = max(int(domain_age_days), 0)
+    if days <= 30:
+        return {
+            "bucket": "burner_domain",
+            "label": "Burner Domain",
+            "color": "red",
+            "message": "Extreme Risk: This domain was created in the last month. Common in phishing.",
+            "risk_modifier_pct": 50,
+        }
+    if days <= 180:
+        return {
+            "bucket": "new_entity",
+            "label": "New Entity",
+            "color": "orange",
+            "message": "High Risk: Relatively new domain. Proceed with caution.",
+            "risk_modifier_pct": 25,
+        }
+    if days <= 1095:
+        return {
+            "bucket": "emerging",
+            "label": "Emerging",
+            "color": "yellow",
+            "message": "Moderate: Established for over 6 months but lacks a long-term reputation.",
+            "risk_modifier_pct": 0,
+        }
+    if days <= 3650:
+        return {
+            "bucket": "verified_legacy",
+            "label": "Verified Legacy",
+            "color": "green",
+            "message": "Safe: Stable domain with over 3 years of active history.",
+            "risk_modifier_pct": -15,
+        }
+    return {
+        "bucket": "institutional",
+        "label": "Institutional",
+        "color": "cyan",
+        "message": "Trusted: Highly established domain (10+ years). Extremely low risk.",
+        "risk_modifier_pct": -30,
+    }
+
+
+def _apply_domain_age_adjustment(url_score: float, domain_age_days: Optional[int]) -> tuple[float, float, dict]:
+    context = _domain_age_profile(domain_age_days)
+    modifier = float(context.get("risk_modifier_pct") or 0.0)
+
+    # High-age domains can still host phishing: limit negative discount on high-risk URLs.
+    effective_modifier = modifier
+    if modifier < 0:
+        if url_score >= 85:
+            effective_modifier = 0.0
+        elif url_score >= 70:
+            effective_modifier = max(modifier, -10.0)
+
+    adjusted = min(100.0, max(0.0, float(url_score) + effective_modifier))
+    context["risk_modifier_pct"] = int(effective_modifier)
+    return adjusted, effective_modifier, context
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _ssl_status_profile(ssl_status: dict, has_urls: bool) -> dict:
+    if not has_urls:
+        return {
+            "bucket": "not_applicable",
+            "label": "Not Scanned",
+            "badge": "NO SSL DATA",
+            "severity": "neutral",
+            "color": "neutral",
+            "symbol": "N/A",
+            "message": "No URL available for SSL inspection.",
+            "risk_modifier_pct": 0,
+        }
+
+    is_valid = bool((ssl_status or {}).get("is_valid"))
+    issuer = str((ssl_status or {}).get("issuer") or "")
+    subject_org = str((ssl_status or {}).get("subject_organization") or "")
+    validation_error = str((ssl_status or {}).get("validation_error") or "").lower()
+    is_self_signed = bool((ssl_status or {}).get("is_self_signed"))
+    expiry_dt = _parse_iso_datetime((ssl_status or {}).get("expiry_date"))
+    now_utc = datetime.now(timezone.utc)
+
+    if is_valid and expiry_dt is not None:
+        days_to_expiry = max(0, int((expiry_dt - now_utc).total_seconds() // 86400))
+        if days_to_expiry < 7:
+            return {
+                "bucket": "expiring_soon",
+                "label": "Expiring Soon",
+                "badge": "SSL WARNING",
+                "severity": "warning",
+                "color": "amber",
+                "symbol": "~!",
+                "message": "Certificate expires in under 7 days. Revalidation risk is elevated.",
+                "risk_modifier_pct": 15,
+            }
+
+    if is_valid:
+        issuer_lower = issuer.lower()
+        org_lower = subject_org.lower()
+        ev_like = any(
+            marker in f"{issuer_lower} {org_lower}"
+            for marker in ["extended validation", "ev ssl"]
+        )
+        if ev_like:
+            return {
+                "bucket": "ev",
+                "label": "EV Certificate",
+                "badge": "ULTRA SAFE",
+                "severity": "safe",
+                "color": "emerald",
+                "symbol": "EV+",
+                "message": "Extended Validation certificate detected. Strong ownership signal.",
+                "risk_modifier_pct": -40,
+            }
+        return {
+            "bucket": "valid_ov_dv",
+            "label": "Valid OV/DV",
+            "badge": "NEUTRAL",
+            "severity": "neutral",
+            "color": "cyan",
+            "symbol": "DV/OV",
+            "message": "Certificate is valid. SSL alone does not imply trustworthiness.",
+            "risk_modifier_pct": 0,
+        }
+
+    mismatch_markers = ["hostname", "doesn't match", "does not match", "name mismatch"]
+    if any(marker in validation_error for marker in mismatch_markers):
+        return {
+            "bucket": "name_mismatch",
+            "label": "Name Mismatch",
+            "badge": "CRITICAL",
+            "severity": "critical",
+            "color": "red",
+            "symbol": "CN!",
+            "message": "Certificate hostname mismatch. This is a high-confidence phishing indicator.",
+            "risk_modifier_pct": 80,
+        }
+
+    self_signed_markers = ["self signed", "unknown ca", "unable to get local issuer", "self-signed"]
+    if is_self_signed or any(marker in validation_error for marker in self_signed_markers):
+        return {
+            "bucket": "self_signed_untrusted",
+            "label": "Self-Signed / Untrusted",
+            "badge": "CRITICAL",
+            "severity": "critical",
+            "color": "orange",
+            "symbol": "CA!",
+            "message": "Certificate is self-signed or untrusted by the browser trust chain.",
+            "risk_modifier_pct": 50,
+        }
+
+    if expiry_dt is not None and expiry_dt <= now_utc:
+        return {
+            "bucket": "expired",
+            "label": "Expired",
+            "badge": "CRITICAL",
+            "severity": "critical",
+            "color": "red",
+            "symbol": "EXP!",
+            "message": "Certificate has expired and no longer provides valid transport assurance.",
+            "risk_modifier_pct": 60,
+        }
+
+    return {
+        "bucket": "self_signed_untrusted",
+        "label": "Untrusted SSL",
+        "badge": "CRITICAL",
+        "severity": "critical",
+        "color": "orange",
+        "symbol": "TLS!",
+        "message": "SSL validation failed. Treat this destination as unsafe until verified.",
+        "risk_modifier_pct": 50,
+    }
+
+
 def _is_linkedin_internal_url(url: str) -> bool:
     raw = (url or "").strip()
     if not raw:
@@ -397,25 +593,41 @@ def analyze_email(data: AnalyzeRequest):
     mail_url_summary = compute_mail_severity(url_findings)
     mail_severity_score = float(mail_url_summary.get("mail_severity_score") or 0)
     ssl_status = intelligence_profile.get("ssl_status") or {}
-    ssl_invalid_boost = 12.0 if gathered_urls and not bool(ssl_status.get("is_valid")) else 0.0
-    corrected_url_score = min(100.0, url_score + ssl_invalid_boost)
-    final_risk = round(min(100.0, max(float(hybrid.get("unified_score") or 0) + ssl_invalid_boost, mail_severity_score)), 2)
+    ssl_context = _ssl_status_profile(ssl_status, bool(gathered_urls))
+    ssl_modifier = float(ssl_context.get("risk_modifier_pct") or 0.0)
+    if ssl_modifier < 0:
+        if url_score >= 70:
+            ssl_modifier = 0.0
+        elif url_score >= 55:
+            ssl_modifier = max(ssl_modifier, -10.0)
+    ssl_context["risk_modifier_pct"] = int(ssl_modifier)
+
+    ssl_corrected_url_score = min(100.0, max(0.0, url_score + ssl_modifier))
+    corrected_url_score, domain_age_modifier, domain_age_context = _apply_domain_age_adjustment(
+        ssl_corrected_url_score,
+        domain_age_days,
+    )
+
+    local_score = float(hybrid.get("local_score") or 0)
+    ssl_age_score = float(hybrid.get("ssl_age_score") or 0)
+    fusion_score = (0.35 * local_score) + (0.55 * corrected_url_score) + (0.10 * ssl_age_score)
+    final_risk = round(min(100.0, max(fusion_score, mail_severity_score)), 2)
     verdict = _score_to_verdict(final_risk)
     confidence = _score_to_confidence(final_risk)
 
     attack_simulation = _serialize_attack_simulation(final_risk)
 
     threat_category = get_threat_category(
-        float(hybrid.get("local_score") or 0),
-        url_score,
+        local_score,
+        corrected_url_score,
         100.0 if hybrid.get("detected_brand") else 0.0,
         header_score,
         hybrid.get("flagged_phrases") or [],
     )
 
     reasoning_summary = build_reasoning_summary(
-        float(hybrid.get("local_score") or 0),
-        url_score,
+        local_score,
+        corrected_url_score,
         100.0 if hybrid.get("detected_brand") else 0.0,
         header_score,
         hybrid.get("flagged_phrases") or [],
@@ -453,10 +665,11 @@ def analyze_email(data: AnalyzeRequest):
                 "flagged": int(hybrid.get("vt_malicious_engines") or 0),
                 "total": int(hybrid.get("vt_total_engines") or 70),
             },
-            "local_score": float(hybrid.get("local_score") or 0),
+            "local_score": local_score,
             "external_score": corrected_url_score,
-            "ssl_age_score": float(hybrid.get("ssl_age_score") or 0),
-            "ssl_risk_boost": ssl_invalid_boost,
+            "ssl_age_score": ssl_age_score,
+            "ssl_risk_boost": ssl_modifier,
+            "domain_age_risk_modifier": float(domain_age_modifier),
         },
         "url_intelligence": (url_findings[0] if url_findings else None),
         "body_url_intelligence": url_findings,
@@ -470,6 +683,8 @@ def analyze_email(data: AnalyzeRequest):
         "psychological_index": hybrid.get("psychological_index") or {},
         "highlighted_phrases": hybrid.get("flagged_phrases") or [],
         "domain_age_days": domain_age_days,
+        "domain_age_context": domain_age_context,
+        "ssl_context": ssl_context,
         "header_analysis": header_details,
         "threat_intel": threat_details,
         "attack_simulation": attack_simulation,

@@ -747,7 +747,15 @@ class HybridConsensusScanner:
 
     def _ssl_details(self, hostname: str) -> dict:
         if not hostname:
-            return {"issuer": "Unknown", "expiry_date": None, "is_valid": False}
+            return {
+                "issuer": "Unknown",
+                "expiry_date": None,
+                "is_valid": False,
+                "validation_error": "missing-hostname",
+                "subject_common_name": None,
+                "subject_organization": None,
+                "is_self_signed": False,
+            }
         try:
             context = ssl.create_default_context()
             with socket.create_connection((hostname, 443), timeout=3) as sock:
@@ -778,9 +786,57 @@ class HybridConsensusScanner:
                 except Exception:
                     is_valid = True
 
-            return {"issuer": issuer, "expiry_date": expiry_iso, "is_valid": bool(is_valid)}
-        except Exception:
-            return {"issuer": "None", "expiry_date": None, "is_valid": False}
+            subject_cn = None
+            subject_org = None
+            subject_raw = cert.get("subject")
+            if subject_raw and isinstance(subject_raw, (list, tuple)):
+                for item in subject_raw:
+                    for kv in item:
+                        if not (isinstance(kv, tuple) and len(kv) == 2):
+                            continue
+                        key = str(kv[0]).strip().lower()
+                        value = str(kv[1]).strip()
+                        if key == "commonname" and not subject_cn:
+                            subject_cn = value
+                        if key == "organizationname" and not subject_org:
+                            subject_org = value
+
+            issuer_self = False
+            try:
+                issuer_raw = cert.get("issuer")
+                issuer_self = bool(subject_raw and issuer_raw and str(subject_raw) == str(issuer_raw))
+            except Exception:
+                issuer_self = False
+
+            return {
+                "issuer": issuer,
+                "expiry_date": expiry_iso,
+                "is_valid": bool(is_valid),
+                "validation_error": None,
+                "subject_common_name": subject_cn,
+                "subject_organization": subject_org,
+                "is_self_signed": issuer_self,
+            }
+        except ssl.SSLCertVerificationError as exc:
+            return {
+                "issuer": "None",
+                "expiry_date": None,
+                "is_valid": False,
+                "validation_error": (getattr(exc, "verify_message", None) or str(exc) or "ssl-verification-failed"),
+                "subject_common_name": None,
+                "subject_organization": None,
+                "is_self_signed": False,
+            }
+        except Exception as exc:
+            return {
+                "issuer": "None",
+                "expiry_date": None,
+                "is_valid": False,
+                "validation_error": str(exc) or "ssl-check-failed",
+                "subject_common_name": None,
+                "subject_organization": None,
+                "is_self_signed": False,
+            }
 
     def _ip_geo_details(self, hostname: str) -> dict:
         if not hostname:

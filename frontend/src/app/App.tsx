@@ -200,9 +200,12 @@ const AppContent = () => {
           url={url}
           riskScore={analysis?.breakdown?.url_score ?? analysis?.unified_severity_score ?? analysis?.final_risk ?? riskScore}
           domainAgeDays={analysis?.domain_age_days ?? null}
+          domainAgeContext={analysis?.domain_age_context}
+          sslContext={analysis?.ssl_context}
           intelligenceProfile={analysis?.intelligence_profile}
           riskBreakdown={analysis?.risk_breakdown}
           threatArray={analysis?.threat_array}
+          scannedAt={analysis?.timestamp}
         />
       </div>
     );

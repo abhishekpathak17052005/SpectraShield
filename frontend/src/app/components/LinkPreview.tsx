@@ -10,6 +10,7 @@ import {
   Calendar,
   AlertTriangle,
   CheckCircle2,
+  CircleHelp,
   XCircle,
   ExternalLink,
   Eye,
@@ -20,12 +21,15 @@ import {
   Link2,
   Zap,
 } from "lucide-react";
-import type { IntelligenceProfile } from "../api";
+import type { IntelligenceProfile, DomainAgeContext, SSLContext } from "../api";
 
 interface LinkPreviewProps {
   url?: string;
   riskScore?: number;
+  scannedAt?: string;
   domainAgeDays?: number | null;
+  domainAgeContext?: DomainAgeContext;
+  sslContext?: SSLContext;
   intelligenceProfile?: IntelligenceProfile;
   riskBreakdown?: {
     brand_match?: string;
@@ -48,7 +52,10 @@ interface ThreatIndicator {
 const LinkPreview: React.FC<LinkPreviewProps> = ({
   url = "https://secure-verify-account.tk/login/microsoft/verify",
   riskScore = 87,
+  scannedAt,
   domainAgeDays,
+  domainAgeContext,
+  sslContext,
   intelligenceProfile,
   riskBreakdown,
   threatArray,
@@ -62,6 +69,45 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
     setMounted(true);
   }, []);
 
+  const [relativeNow, setRelativeNow] = useState<number>(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRelativeNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const formatUnit = (value: number, unit: string): string => {
+    return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
+  };
+
+  const formatLastScanned = (timestamp?: string): string => {
+    if (!timestamp) return "Unknown";
+    const parsed = new Date(timestamp);
+    const scannedMs = parsed.getTime();
+    if (!Number.isFinite(scannedMs)) return "Unknown";
+
+    const diffSeconds = Math.max(0, Math.floor((relativeNow - scannedMs) / 1000));
+    if (diffSeconds < 5) return "just now";
+    if (diffSeconds < 60) return formatUnit(diffSeconds, "second");
+
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) return formatUnit(diffMinutes, "minute");
+
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return formatUnit(diffHours, "hour");
+
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return formatUnit(diffDays, "day");
+
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffMonths < 12) return formatUnit(diffMonths, "month");
+
+    const diffYears = Math.floor(diffDays / 365);
+    return formatUnit(diffYears, "year");
+  };
+
   const colors = {
     safe: mounted && resolvedTheme === "light" ? "#16A34A" : "#00FFAA",
     warning: mounted && resolvedTheme === "light" ? "#F59E0B" : "#FFA500",
@@ -71,10 +117,278 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
   const tech = intelligenceProfile?.advanced_technical_details;
   const domainAgeValue = domainAgeDays ?? tech?.domain_age_days ?? null;
   const domainAge = domainAgeValue != null ? `${domainAgeValue} days` : "Unknown";
-  const sslValid = !!intelligenceProfile?.ssl_status?.is_valid;
-  const sslStatus = sslValid ? "SSL Valid" : "SSL Missing/Expired";
-  const sslIssuer = intelligenceProfile?.ssl_status?.issuer || "Unknown";
+  const deriveDomainAgeContext = (days: number | null): DomainAgeContext => {
+    if (days == null) {
+      return {
+        bucket: "unknown",
+        label: "Unknown",
+        color: "neutral",
+        message: "Domain age could not be verified.",
+        risk_modifier_pct: 0,
+      };
+    }
+    if (days <= 30) {
+      return {
+        bucket: "burner_domain",
+        label: "Burner Domain",
+        color: "red",
+        message: "Extreme Risk: This domain was created in the last month. Common in phishing.",
+        risk_modifier_pct: 50,
+      };
+    }
+    if (days <= 180) {
+      return {
+        bucket: "new_entity",
+        label: "New Entity",
+        color: "orange",
+        message: "High Risk: Relatively new domain. Proceed with caution.",
+        risk_modifier_pct: 25,
+      };
+    }
+    if (days <= 1095) {
+      return {
+        bucket: "emerging",
+        label: "Emerging",
+        color: "yellow",
+        message: "Moderate: Established for over 6 months but lacks a long-term reputation.",
+        risk_modifier_pct: 0,
+      };
+    }
+    if (days <= 3650) {
+      return {
+        bucket: "verified_legacy",
+        label: "Verified Legacy",
+        color: "green",
+        message: "Safe: Stable domain with over 3 years of active history.",
+        risk_modifier_pct: -15,
+      };
+    }
+    return {
+      bucket: "institutional",
+      label: "Institutional",
+      color: "cyan",
+      message: "Trusted: Highly established domain (10+ years). Extremely low risk.",
+      risk_modifier_pct: -30,
+    };
+  };
+
+  const effectiveDomainAgeContext = domainAgeContext ?? deriveDomainAgeContext(domainAgeValue);
+  const domainColorMap: Record<string, {
+    text: string;
+    icon: string;
+    panel: string;
+    chip: string;
+    tone: string;
+  }> = {
+    red: {
+      text: "text-red-500",
+      icon: "text-red-500",
+      panel: "from-red-500/15",
+      chip: "bg-red-500/15 text-red-400 border-red-500/35",
+      tone: "Extreme Risk",
+    },
+    orange: {
+      text: "text-orange-500",
+      icon: "text-orange-500",
+      panel: "from-orange-500/15",
+      chip: "bg-orange-500/15 text-orange-400 border-orange-500/35",
+      tone: "High Risk",
+    },
+    yellow: {
+      text: "text-yellow-400",
+      icon: "text-yellow-400",
+      panel: "from-yellow-400/15",
+      chip: "bg-yellow-400/15 text-yellow-300 border-yellow-400/35",
+      tone: "Moderate",
+    },
+    green: {
+      text: "text-emerald-500",
+      icon: "text-emerald-500",
+      panel: "from-emerald-500/15",
+      chip: "bg-emerald-500/15 text-emerald-400 border-emerald-500/35",
+      tone: "Safe",
+    },
+    cyan: {
+      text: "text-cyan-400",
+      icon: "text-cyan-400",
+      panel: "from-cyan-400/15",
+      chip: "bg-cyan-400/15 text-cyan-300 border-cyan-400/35",
+      tone: "Trusted",
+    },
+    neutral: {
+      text: "text-slate-400",
+      icon: "text-slate-400",
+      panel: "from-slate-400/15",
+      chip: "bg-slate-400/12 text-slate-300 border-slate-400/35",
+      tone: "Unknown",
+    },
+  };
+  const domainAgeVisual = domainColorMap[effectiveDomainAgeContext.color] ?? domainColorMap.neutral;
+  const modifier = effectiveDomainAgeContext.risk_modifier_pct ?? 0;
+  const modifierText = `${modifier > 0 ? "+" : ""}${modifier}% Risk score`;
   const sslExpiry = intelligenceProfile?.ssl_status?.expiry_date || "Unknown";
+
+  const parseIsoDate = (value?: string | null): Date | null => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  };
+
+  const deriveSslContext = (): SSLContext => {
+    if (sslContext) {
+      return sslContext;
+    }
+
+    const status = intelligenceProfile?.ssl_status;
+    const valid = !!status?.is_valid;
+    const validationError = String(status?.validation_error || "").toLowerCase();
+    const expiryDt = parseIsoDate(status?.expiry_date);
+    const now = new Date();
+
+    if (valid && expiryDt) {
+      const daysLeft = Math.max(0, Math.floor((expiryDt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      if (daysLeft < 7) {
+        return {
+          bucket: "expiring_soon",
+          label: "Expiring Soon",
+          badge: "SSL WARNING",
+          severity: "warning",
+          color: "amber",
+          symbol: "~!",
+          message: "Certificate expires in under 7 days. Revalidation risk is elevated.",
+          risk_modifier_pct: 15,
+        };
+      }
+    }
+
+    if (valid) {
+      const marker = `${String(status?.issuer || "").toLowerCase()} ${String(status?.subject_organization || "").toLowerCase()}`;
+      if (marker.includes("extended validation") || marker.includes("ev ssl")) {
+        return {
+          bucket: "ev",
+          label: "EV Certificate",
+          badge: "ULTRA SAFE",
+          severity: "safe",
+          color: "emerald",
+          symbol: "EV+",
+          message: "Extended Validation certificate detected. Strong ownership signal.",
+          risk_modifier_pct: -40,
+        };
+      }
+      return {
+        bucket: "valid_ov_dv",
+        label: "Valid OV/DV",
+        badge: "NEUTRAL",
+        severity: "neutral",
+        color: "cyan",
+        symbol: "DV/OV",
+        message: "Certificate is valid. SSL alone does not imply trustworthiness.",
+        risk_modifier_pct: 0,
+      };
+    }
+
+    if (["hostname", "doesn't match", "does not match", "name mismatch"].some((m) => validationError.includes(m))) {
+      return {
+        bucket: "name_mismatch",
+        label: "Name Mismatch",
+        badge: "CRITICAL",
+        severity: "critical",
+        color: "red",
+        symbol: "CN!",
+        message: "Certificate hostname mismatch. This is a high-confidence phishing indicator.",
+        risk_modifier_pct: 80,
+      };
+    }
+
+    if (status?.is_self_signed || ["self signed", "unknown ca", "unable to get local issuer", "self-signed"].some((m) => validationError.includes(m))) {
+      return {
+        bucket: "self_signed_untrusted",
+        label: "Self-Signed / Untrusted",
+        badge: "CRITICAL",
+        severity: "critical",
+        color: "orange",
+        symbol: "CA!",
+        message: "Certificate is self-signed or untrusted by the browser trust chain.",
+        risk_modifier_pct: 50,
+      };
+    }
+
+    if (expiryDt && expiryDt.getTime() <= now.getTime()) {
+      return {
+        bucket: "expired",
+        label: "Expired",
+        badge: "CRITICAL",
+        severity: "critical",
+        color: "red",
+        symbol: "EXP!",
+        message: "Certificate has expired and no longer provides valid transport assurance.",
+        risk_modifier_pct: 60,
+      };
+    }
+
+    return {
+      bucket: "self_signed_untrusted",
+      label: "Untrusted SSL",
+      badge: "CRITICAL",
+      severity: "critical",
+      color: "orange",
+      symbol: "TLS!",
+      message: "SSL validation failed. Treat this destination as unsafe until verified.",
+      risk_modifier_pct: 50,
+    };
+  };
+
+  const effectiveSslContext = deriveSslContext();
+  const sslModifier = effectiveSslContext.risk_modifier_pct ?? 0;
+  const sslModifierText = `${sslModifier > 0 ? "+" : ""}${sslModifier}% Risk score`;
+  const sslToneMap: Record<string, {
+    text: string;
+    icon: string;
+    panel: string;
+    chip: string;
+  }> = {
+    emerald: {
+      text: "text-emerald-500",
+      icon: "text-emerald-500",
+      panel: "from-emerald-500/15",
+      chip: "bg-emerald-500/15 text-emerald-400 border-emerald-500/35",
+    },
+    cyan: {
+      text: "text-cyan-400",
+      icon: "text-cyan-400",
+      panel: "from-cyan-400/15",
+      chip: "bg-cyan-400/15 text-cyan-300 border-cyan-400/35",
+    },
+    amber: {
+      text: "text-amber-400",
+      icon: "text-amber-400",
+      panel: "from-amber-400/15",
+      chip: "bg-amber-400/15 text-amber-300 border-amber-400/35",
+    },
+    red: {
+      text: "text-red-500",
+      icon: "text-red-500",
+      panel: "from-red-500/15",
+      chip: "bg-red-500/15 text-red-400 border-red-500/35",
+    },
+    orange: {
+      text: "text-orange-500",
+      icon: "text-orange-500",
+      panel: "from-orange-500/15",
+      chip: "bg-orange-500/15 text-orange-400 border-orange-500/35",
+    },
+    neutral: {
+      text: "text-slate-400",
+      icon: "text-slate-400",
+      panel: "from-slate-400/15",
+      chip: "bg-slate-400/12 text-slate-300 border-slate-400/35",
+    },
+  };
+  const sslVisual = sslToneMap[effectiveSslContext.color] ?? sslToneMap.neutral;
+  const sslIsSafe = effectiveSslContext.severity === "safe";
+  const sslIsWarning = effectiveSslContext.severity === "warning";
+  const sslIsTrustedNeutral = effectiveSslContext.bucket === "valid_ov_dv";
+  const sslIssuer = intelligenceProfile?.ssl_status?.issuer || "Unknown";
   const location = intelligenceProfile?.location_data?.country || "Unknown";
   const isp = intelligenceProfile?.location_data?.isp || "Unknown";
   const ipAddress = intelligenceProfile?.location_data?.ip_address || "Unknown";
@@ -83,7 +397,7 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
   const redirectHops = typeof tech?.redirect_hops === "number" ? tech.redirect_hops : 0;
   const pageTitle = tech?.page_title || "Unknown";
   const registrar = (tech?.whois && String((tech.whois as Record<string, unknown>).registrar || "")) || "Unknown";
-  const lastScanned = "2 minutes ago";
+  const lastScanned = formatLastScanned(scannedAt);
 
   const sourceThreats = threatArray && threatArray.length > 0
     ? threatArray
@@ -228,21 +542,36 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
           transition={{ delay: 0.2 }}
           className="bg-card border border-border rounded-xl p-4 shadow-sm relative overflow-hidden"
         >
-          <div className="absolute inset-0 bg-gradient-to-br from-warning/5 to-transparent opacity-50" />
+          <div className={`absolute inset-0 bg-gradient-to-br ${domainAgeVisual.panel} to-transparent opacity-50`} />
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-3">
-              <Calendar className="w-4 h-4 text-warning" />
+              <Calendar className={`w-4 h-4 ${domainAgeVisual.icon}`} />
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Domain Age
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <div className="text-2xl font-bold text-warning">{domainAge}</div>
-              <AlertTriangle className="w-5 h-5 text-warning/50" />
+              <div>
+                <div className={`text-2xl font-bold ${domainAgeVisual.text}`}>{domainAge}</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className={`text-xs font-semibold ${domainAgeVisual.text}`}>{effectiveDomainAgeContext.label}</span>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${domainAgeVisual.chip}`}>
+                    {domainAgeVisual.tone}
+                  </span>
+                </div>
+              </div>
+              {effectiveDomainAgeContext.bucket === "unknown" ? (
+                <CircleHelp className={`w-5 h-5 ${domainAgeVisual.icon}`} />
+              ) : modifier > 0 ? (
+                <AlertTriangle className={`w-5 h-5 ${domainAgeVisual.icon}`} />
+              ) : (
+                <CheckCircle2 className={`w-5 h-5 ${domainAgeVisual.icon}`} />
+              )}
             </div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              Registered recently
+            <div className="mt-2 text-xs text-muted-foreground leading-relaxed">
+              {effectiveDomainAgeContext.message}
             </div>
+            <div className={`mt-1 text-[11px] font-semibold ${domainAgeVisual.text}`}>{modifierText}</div>
           </div>
         </motion.div>
 
@@ -253,30 +582,40 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
           transition={{ delay: 0.3 }}
           className="bg-card border border-border rounded-xl p-4 shadow-sm relative overflow-hidden"
         >
-          <div className={`absolute inset-0 bg-gradient-to-br ${sslValid ? 'from-safe/5' : 'from-destructive/5'} to-transparent opacity-50`} />
+          <div className={`absolute inset-0 bg-gradient-to-br ${sslVisual.panel} to-transparent opacity-50`} />
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-3">
-              {sslValid ? (
-                <Lock className="w-4 h-4 text-safe" />
+              {sslIsSafe ? (
+                <Lock className={`w-4 h-4 ${sslVisual.icon}`} />
+              ) : sslIsWarning ? (
+                <AlertTriangle className={`w-4 h-4 ${sslVisual.icon}`} />
               ) : (
-                <Unlock className="w-4 h-4 text-destructive" />
+                <Unlock className={`w-4 h-4 ${sslVisual.icon}`} />
               )}
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 SSL Status
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <div className={`text-sm font-bold ${sslValid ? 'text-safe' : 'text-destructive'}`}>
-                {sslStatus}
+              <div>
+                <div className={`text-sm font-bold ${sslVisual.text}`}>{effectiveSslContext.label}</div>
+                <div className="mt-1">
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${sslVisual.chip}`}>
+                    {effectiveSslContext.badge}
+                  </span>
+                </div>
               </div>
-              {sslValid ? (
-                <CheckCircle2 className="w-5 h-5 text-safe/50" />
+              {sslIsSafe || sslIsTrustedNeutral ? (
+                <CheckCircle2 className={`w-5 h-5 ${sslVisual.icon}`} />
+              ) : sslIsWarning ? (
+                <AlertTriangle className={`w-5 h-5 ${sslVisual.icon}`} />
               ) : (
-                <XCircle className="w-5 h-5 text-destructive/50" />
+                <XCircle className={`w-5 h-5 ${sslVisual.icon}`} />
               )}
             </div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              {sslValid ? 'Certificate verified' : 'Security risk detected'}
+            <div className="mt-2 text-xs text-muted-foreground leading-relaxed">{effectiveSslContext.message}</div>
+            <div className={`mt-1 text-[11px] font-semibold ${sslVisual.text}`}>
+              {sslModifierText}
             </div>
             <div className="mt-1 text-[10px] text-muted-foreground truncate">Issuer: {sslIssuer}</div>
           </div>

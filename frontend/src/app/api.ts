@@ -24,6 +24,10 @@ export interface IntelligenceProfile {
     issuer?: string | null;
     expiry_date?: string | null;
     is_valid?: boolean;
+    validation_error?: string | null;
+    subject_common_name?: string | null;
+    subject_organization?: string | null;
+    is_self_signed?: boolean;
   };
   location_data?: {
     country?: string | null;
@@ -45,9 +49,29 @@ export interface IntelligenceProfile {
   };
 }
 
+export interface DomainAgeContext {
+  bucket: string;
+  label: string;
+  color: string;
+  message: string;
+  risk_modifier_pct: number;
+}
+
+export interface SSLContext {
+  bucket: string;
+  label: string;
+  badge: string;
+  severity: string;
+  color: string;
+  symbol: string;
+  message: string;
+  risk_modifier_pct: number;
+}
+
 export interface AnalyzeResponse {
   final_risk: number;
   unified_severity_score?: number;
+  timestamp?: string;
   verdict: string;
   confidence_level: string;
   threat_category?: string;
@@ -61,6 +85,7 @@ export interface AnalyzeResponse {
     local_score?: number;
     external_score?: number;
     ssl_age_score?: number;
+    domain_age_risk_modifier?: number;
   };
   breakdown: {
     manipulation_score: number;
@@ -72,6 +97,8 @@ export interface AnalyzeResponse {
   psychological_index?: number;
   highlighted_phrases?: string[] | null;
   domain_age_days?: number | null;
+  domain_age_context?: DomainAgeContext;
+  ssl_context?: SSLContext;
   header_analysis?: unknown;
   threat_intel?: unknown;
   attack_simulation?: unknown;
