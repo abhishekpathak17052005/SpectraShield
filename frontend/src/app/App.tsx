@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { ShieldCheck, Settings, Monitor, Mail, Link2, BarChart3, Palette } from "lucide-react";
+import { ShieldCheck, Monitor, Link2, BarChart3, Sun, Moon, Laptop } from "lucide-react";
 import { motion } from "motion/react";
+import { useTheme } from "next-themes";
 import { ThemeProvider } from "./components/ThemeProvider";
-import { ThemeToggle } from "./components/ThemeToggle";
 import RiskMeter from "./components/RiskMeter";
 import RiskBreakdown from "./components/RiskBreakdown";
 import WhyFlagged from "./components/WhyFlagged";
@@ -21,6 +21,7 @@ const DEFAULT_URL = "https://secure-verify-account.tk/login/microsoft";
 const DEFAULT_SENDER = "security-noreply@accountverify.tk";
 
 const AppContent = () => {
+  const { theme, setTheme } = useTheme();
   const [emailText, setEmailText] = useState(DEFAULT_EMAIL_TEXT);
   const [emailHeader, setEmailHeader] = useState("");
   const [url, setUrl] = useState(DEFAULT_URL);
@@ -33,10 +34,42 @@ const AppContent = () => {
   const [showBanner, setShowBanner] = useState(false);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [viewMode, setViewMode] = useState<"popup" | "gmail" | "linkpreview" | "linkdemo" | "dashboard" | "styleguide">("popup");
+  const [themeMounted, setThemeMounted] = useState(false);
 
   useEffect(() => {
     document.title = "SpectraShield AI";
   }, []);
+
+  useEffect(() => {
+    setThemeMounted(true);
+  }, []);
+
+  const cycleTheme = () => {
+    const current = theme || "system";
+    if (current === "system") {
+      setTheme("light");
+      return;
+    }
+    if (current === "light") {
+      setTheme("dark");
+      return;
+    }
+    setTheme("system");
+  };
+
+  const themeIcon = (() => {
+    const current = themeMounted ? (theme || "system") : "system";
+    if (current === "light") return <Sun className="w-4 h-4" />;
+    if (current === "dark") return <Moon className="w-4 h-4" />;
+    return <Laptop className="w-4 h-4" />;
+  })();
+
+  const themeLabel = (() => {
+    const current = themeMounted ? (theme || "system") : "system";
+    if (current === "light") return "Theme: Light (click to switch to Dark)";
+    if (current === "dark") return "Theme: Dark (click to switch to System)";
+    return "Theme: System (click to switch to Light)";
+  })();
 
   const extractFirstUrl = (text: string): string | null => {
     const match = text.match(/https?:\/\/[^\s]+/i);
@@ -132,20 +165,12 @@ const AppContent = () => {
   // Helper for view toggles to keep code DRY
   const ViewToggle = () => (
     <div className="fixed top-4 right-4 z-50 flex gap-2">
-      <ThemeToggle />
       <button
         onClick={() => setViewMode("popup")}
         className="flex items-center gap-2 px-3 py-2 bg-card text-card-foreground rounded-full shadow-lg border border-border hover:bg-accent transition-all text-sm"
         title="Popup View"
       >
         <Monitor className="w-4 h-4" />
-      </button>
-      <button
-        onClick={() => setViewMode("gmail")}
-        className="flex items-center gap-2 px-3 py-2 bg-card text-card-foreground rounded-full shadow-lg border border-border hover:bg-accent transition-all text-sm"
-        title="Gmail Integration"
-      >
-        <Mail className="w-4 h-4" />
       </button>
       <button
         onClick={() => setViewMode("linkpreview")}
@@ -160,13 +185,6 @@ const AppContent = () => {
         title="Dashboard"
       >
         <BarChart3 className="w-4 h-4" />
-      </button>
-      <button
-        onClick={() => setViewMode("styleguide")}
-        className="flex items-center gap-2 px-3 py-2 bg-card text-card-foreground rounded-full shadow-lg border border-border hover:bg-accent transition-all text-sm"
-        title="Style Guide"
-      >
-        <Palette className="w-4 h-4" />
       </button>
     </div>
   );
@@ -268,8 +286,14 @@ const AppContent = () => {
               SpectraShield AI
             </span>
           </div>
-          <button className="p-2 hover:bg-accent rounded-full transition-colors text-muted-foreground hover:text-foreground">
-            <Settings className="w-4 h-4" />
+          <button
+            type="button"
+            onClick={cycleTheme}
+            title={themeLabel}
+            aria-label={themeLabel}
+            className="p-2 hover:bg-accent rounded-full transition-colors text-muted-foreground hover:text-foreground"
+          >
+            {themeIcon}
           </button>
         </header>
 
