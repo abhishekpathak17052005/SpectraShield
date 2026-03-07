@@ -173,6 +173,7 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
   };
 
   const effectiveDomainAgeContext = domainAgeContext ?? deriveDomainAgeContext(domainAgeValue);
+  const isLightMode = mounted && resolvedTheme === "light";
   const domainColorMap: Record<string, {
     text: string;
     icon: string;
@@ -181,45 +182,57 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
     tone: string;
   }> = {
     red: {
-      text: "text-red-500",
-      icon: "text-red-500",
-      panel: "from-red-500/15",
-      chip: "bg-red-500/15 text-red-400 border-red-500/35",
+      text: isLightMode ? "text-red-700" : "text-red-500",
+      icon: isLightMode ? "text-red-700" : "text-red-500",
+      panel: isLightMode ? "from-red-600/12" : "from-red-500/15",
+      chip: isLightMode
+        ? "bg-red-100 text-red-700 border-red-300/80"
+        : "bg-red-500/15 text-red-400 border-red-500/35",
       tone: "Extreme Risk",
     },
     orange: {
-      text: "text-orange-500",
-      icon: "text-orange-500",
-      panel: "from-orange-500/15",
-      chip: "bg-orange-500/15 text-orange-400 border-orange-500/35",
+      text: isLightMode ? "text-orange-700" : "text-orange-500",
+      icon: isLightMode ? "text-orange-700" : "text-orange-500",
+      panel: isLightMode ? "from-orange-600/12" : "from-orange-500/15",
+      chip: isLightMode
+        ? "bg-orange-100 text-orange-700 border-orange-300/80"
+        : "bg-orange-500/15 text-orange-400 border-orange-500/35",
       tone: "High Risk",
     },
     yellow: {
-      text: "text-yellow-400",
-      icon: "text-yellow-400",
-      panel: "from-yellow-400/15",
-      chip: "bg-yellow-400/15 text-yellow-300 border-yellow-400/35",
+      text: isLightMode ? "text-amber-700" : "text-yellow-400",
+      icon: isLightMode ? "text-amber-700" : "text-yellow-400",
+      panel: isLightMode ? "from-amber-600/12" : "from-yellow-400/15",
+      chip: isLightMode
+        ? "bg-amber-100 text-amber-700 border-amber-300/80"
+        : "bg-yellow-400/15 text-yellow-300 border-yellow-400/35",
       tone: "Moderate",
     },
     green: {
-      text: "text-emerald-500",
-      icon: "text-emerald-500",
-      panel: "from-emerald-500/15",
-      chip: "bg-emerald-500/15 text-emerald-400 border-emerald-500/35",
+      text: isLightMode ? "text-emerald-700" : "text-emerald-500",
+      icon: isLightMode ? "text-emerald-700" : "text-emerald-500",
+      panel: isLightMode ? "from-emerald-600/12" : "from-emerald-500/15",
+      chip: isLightMode
+        ? "bg-emerald-100 text-emerald-700 border-emerald-300/80"
+        : "bg-emerald-500/15 text-emerald-400 border-emerald-500/35",
       tone: "Safe",
     },
     cyan: {
-      text: "text-cyan-400",
-      icon: "text-cyan-400",
-      panel: "from-cyan-400/15",
-      chip: "bg-cyan-400/15 text-cyan-300 border-cyan-400/35",
+      text: isLightMode ? "text-cyan-700" : "text-cyan-400",
+      icon: isLightMode ? "text-cyan-700" : "text-cyan-400",
+      panel: isLightMode ? "from-cyan-600/12" : "from-cyan-400/15",
+      chip: isLightMode
+        ? "bg-cyan-100 text-cyan-700 border-cyan-300/80"
+        : "bg-cyan-400/15 text-cyan-300 border-cyan-400/35",
       tone: "Trusted",
     },
     neutral: {
-      text: "text-slate-400",
-      icon: "text-slate-400",
-      panel: "from-slate-400/15",
-      chip: "bg-slate-400/12 text-slate-300 border-slate-400/35",
+      text: isLightMode ? "text-slate-600" : "text-slate-400",
+      icon: isLightMode ? "text-slate-600" : "text-slate-400",
+      panel: isLightMode ? "from-slate-500/10" : "from-slate-400/15",
+      chip: isLightMode
+        ? "bg-slate-100 text-slate-700 border-slate-300/80"
+        : "bg-slate-400/12 text-slate-300 border-slate-400/35",
       tone: "Unknown",
     },
   };
@@ -348,40 +361,52 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({
     chip: string;
   }> = {
     emerald: {
-      text: "text-emerald-500",
-      icon: "text-emerald-500",
-      panel: "from-emerald-500/15",
-      chip: "bg-emerald-500/15 text-emerald-400 border-emerald-500/35",
+      text: isLightMode ? "text-emerald-700" : "text-emerald-500",
+      icon: isLightMode ? "text-emerald-700" : "text-emerald-500",
+      panel: isLightMode ? "from-emerald-600/12" : "from-emerald-500/15",
+      chip: isLightMode
+        ? "bg-emerald-100 text-emerald-700 border-emerald-300/80"
+        : "bg-emerald-500/15 text-emerald-400 border-emerald-500/35",
     },
     cyan: {
-      text: "text-cyan-400",
-      icon: "text-cyan-400",
-      panel: "from-cyan-400/15",
-      chip: "bg-cyan-400/15 text-cyan-300 border-cyan-400/35",
+      text: isLightMode ? "text-cyan-700" : "text-cyan-400",
+      icon: isLightMode ? "text-cyan-700" : "text-cyan-400",
+      panel: isLightMode ? "from-cyan-600/12" : "from-cyan-400/15",
+      chip: isLightMode
+        ? "bg-cyan-100 text-cyan-700 border-cyan-300/80"
+        : "bg-cyan-400/15 text-cyan-300 border-cyan-400/35",
     },
     amber: {
-      text: "text-amber-400",
-      icon: "text-amber-400",
-      panel: "from-amber-400/15",
-      chip: "bg-amber-400/15 text-amber-300 border-amber-400/35",
+      text: isLightMode ? "text-amber-700" : "text-amber-400",
+      icon: isLightMode ? "text-amber-700" : "text-amber-400",
+      panel: isLightMode ? "from-amber-600/12" : "from-amber-400/15",
+      chip: isLightMode
+        ? "bg-amber-100 text-amber-700 border-amber-300/80"
+        : "bg-amber-400/15 text-amber-300 border-amber-400/35",
     },
     red: {
-      text: "text-red-500",
-      icon: "text-red-500",
-      panel: "from-red-500/15",
-      chip: "bg-red-500/15 text-red-400 border-red-500/35",
+      text: isLightMode ? "text-red-700" : "text-red-500",
+      icon: isLightMode ? "text-red-700" : "text-red-500",
+      panel: isLightMode ? "from-red-600/12" : "from-red-500/15",
+      chip: isLightMode
+        ? "bg-red-100 text-red-700 border-red-300/80"
+        : "bg-red-500/15 text-red-400 border-red-500/35",
     },
     orange: {
-      text: "text-orange-500",
-      icon: "text-orange-500",
-      panel: "from-orange-500/15",
-      chip: "bg-orange-500/15 text-orange-400 border-orange-500/35",
+      text: isLightMode ? "text-orange-700" : "text-orange-500",
+      icon: isLightMode ? "text-orange-700" : "text-orange-500",
+      panel: isLightMode ? "from-orange-600/12" : "from-orange-500/15",
+      chip: isLightMode
+        ? "bg-orange-100 text-orange-700 border-orange-300/80"
+        : "bg-orange-500/15 text-orange-400 border-orange-500/35",
     },
     neutral: {
-      text: "text-slate-400",
-      icon: "text-slate-400",
-      panel: "from-slate-400/15",
-      chip: "bg-slate-400/12 text-slate-300 border-slate-400/35",
+      text: isLightMode ? "text-slate-600" : "text-slate-400",
+      icon: isLightMode ? "text-slate-600" : "text-slate-400",
+      panel: isLightMode ? "from-slate-500/10" : "from-slate-400/15",
+      chip: isLightMode
+        ? "bg-slate-100 text-slate-700 border-slate-300/80"
+        : "bg-slate-400/12 text-slate-300 border-slate-400/35",
     },
   };
   const sslVisual = sslToneMap[effectiveSslContext.color] ?? sslToneMap.neutral;

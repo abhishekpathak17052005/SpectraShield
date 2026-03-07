@@ -122,6 +122,12 @@ def get_history():
     records = list(scan_collection.find({}, {"_id": 0}))
     return records[::-1]  # newest first
 
+
+@router.get("/history/count")
+def get_history_count():
+    total_scans = scan_collection.count_documents({})
+    return {"total_scans": total_scans}
+
 @router.delete("/history")
 def clear_history():
     scan_collection.delete_many({})

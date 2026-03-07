@@ -29,16 +29,35 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-// Parse "YYYY-MM-DD HH:MM:SS" to Date
-const parseTimestamp = (ts: string): Date => {
+// Parse ISO timestamps and legacy "YYYY-MM-DD HH:MM:SS" into Date.
+const parseTimestamp = (ts: string): Date | null => {
+  if (!ts) return null;
+
+  const direct = new Date(ts);
+  if (Number.isFinite(direct.getTime())) return direct;
+
   const [d, t] = ts.split(" ");
   const [y, mo, day] = (d || "").split("-").map(Number);
   const [h, m, s] = (t || "0:0:0").split(":").map(Number);
-  return new Date(y, (mo || 1) - 1, day || 1, h || 0, m || 0, s || 0);
+  const parsed = new Date(y, (mo || 1) - 1, day || 1, h || 0, m || 0, s || 0);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const getDaysForRange = (range: "7d" | "30d" | "90d"): number => {
+  if (range === "30d") return 30;
+  if (range === "90d") return 90;
+  return 7;
+};
+
+const isWithinLastNDays = (date: Date, days: number, now: Date): boolean => {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  return date >= start && date <= now;
+};
 
 const impersonatedBrands = [
   { name: "Microsoft", count: 1234, color: "#00A4EF" },
@@ -141,49 +160,58 @@ const Dashboard: React.FC = () => {
       .finally(() => setClearing(false));
   };
 
-  const filteredHistory = useMemo(() => {
-    if (riskFilter === "all") return history;
+  const rangeHistory = useMemo(() => {
+    const daysToInclude = getDaysForRange(timeRange);
+    const now = new Date();
     return history.filter((r) => {
+      const parsed = parseTimestamp(r.timestamp);
+      if (!parsed) return false;
+      return isWithinLastNDays(parsed, daysToInclude, now);
+    });
+  }, [history, timeRange]);
+
+  const filteredHistory = useMemo(() => {
+    if (riskFilter === "all") return rangeHistory;
+
+    return rangeHistory.filter((r) => {
       if (riskFilter === "low") return r.final_risk < 35;
       if (riskFilter === "medium") return r.final_risk >= 35 && r.final_risk < 70;
       return r.final_risk >= 70;
     });
-  }, [history, riskFilter]);
+  }, [rangeHistory, riskFilter]);
 
   const weeklyDetectionData = useMemo(() => {
-    const days = Array.from({ length: 7 }, (_, i) => {
+    const daysToInclude = getDaysForRange(timeRange);
+    const days = Array.from({ length: daysToInclude }, (_, i) => {
       const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
+      d.setDate(d.getDate() - (daysToInclude - 1 - i));
       return d;
     });
+
     return days.map((d) => {
       const dayKey = d.toISOString().slice(0, 10);
-      const dayLabel = DAY_LABELS[d.getDay()];
-      const onDay = history.filter((r) => {
-        try {
-          const t = parseTimestamp(r.timestamp);
-          return t.toISOString().slice(0, 10) === dayKey;
-        } catch {
-          return false;
-        }
+      const dayLabel = daysToInclude <= 14
+        ? `${DAY_LABELS[d.getDay()]} ${d.getDate()}`
+        : `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`;
+
+      const onDay = rangeHistory.filter((r) => {
+        const t = parseTimestamp(r.timestamp);
+        return !!t && t.toISOString().slice(0, 10) === dayKey;
       });
       const detected = onDay.length;
       const blocked = onDay.filter((r) => r.final_risk >= 70).length;
       return { day: dayLabel, dateKey: dayKey, detected, blocked };
     });
-  }, [history]);
+  }, [rangeHistory, timeRange]);
 
   const heatmapData = useMemo(() => {
     const grid: number[][] = Array(7).fill(null).map(() => Array(24).fill(0));
-    history.forEach((r) => {
-      try {
-        const t = parseTimestamp(r.timestamp);
-        const dayIndex = t.getDay();
-        const hour = t.getHours();
-        grid[dayIndex][hour] += 1;
-      } catch {
-        // skip
-      }
+    rangeHistory.forEach((r) => {
+      const t = parseTimestamp(r.timestamp);
+      if (!t) return;
+      const dayIndex = t.getDay();
+      const hour = t.getHours();
+      grid[dayIndex][hour] += 1;
     });
     const data: { day: string; dayIndex: number; hour: number; value: number }[] = [];
     DAY_LABELS.forEach((day, dayIndex) => {
@@ -192,30 +220,32 @@ const Dashboard: React.FC = () => {
       }
     });
     return data;
-  }, [history]);
+  }, [rangeHistory]);
 
   const threatTrendData = useMemo(() => {
-    const now = new Date();
-    const months: { month: string; monthKey: string; high: number; medium: number; low: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const monthLabel = MONTH_LABELS[d.getMonth()];
-      const inMonth = history.filter((r) => {
-        try {
-          const t = parseTimestamp(r.timestamp);
-          return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}` === monthKey;
-        } catch {
-          return false;
-        }
+    const daysToInclude = getDaysForRange(timeRange);
+    const days = Array.from({ length: daysToInclude }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (daysToInclude - 1 - i));
+      return d;
+    });
+
+    return days.map((d) => {
+      const dayKey = d.toISOString().slice(0, 10);
+      const label = daysToInclude <= 14
+        ? DAY_LABELS[d.getDay()]
+        : `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`;
+      const inDay = rangeHistory.filter((r) => {
+        const t = parseTimestamp(r.timestamp);
+        return !!t && t.toISOString().slice(0, 10) === dayKey;
       });
-      const high = inMonth.filter((r) => r.final_risk >= 70).length;
-      const medium = inMonth.filter((r) => r.final_risk >= 35 && r.final_risk < 70).length;
-      const low = inMonth.filter((r) => r.final_risk < 35).length;
-      months.push({ month: monthLabel, monthKey, high, medium, low });
-    }
-    return months;
-  }, [history]);
+
+      const high = inDay.filter((r) => r.final_risk >= 70).length;
+      const medium = inDay.filter((r) => r.final_risk >= 35 && r.final_risk < 70).length;
+      const low = inDay.filter((r) => r.final_risk < 35).length;
+      return { month: label, monthKey: dayKey, high, medium, low };
+    });
+  }, [rangeHistory, timeRange]);
 
   const recentActivityChartData = useMemo(() => {
     return weeklyDetectionData.map(({ day, detected }) => ({ day, scans: detected }));
@@ -234,11 +264,11 @@ const Dashboard: React.FC = () => {
   };
 
   // Statistics from backend history
-  const totalDetections = history.length;
-  const blockedThreats = history.filter((r) => r.final_risk >= 70).length;
+  const totalDetections = rangeHistory.length;
+  const blockedThreats = rangeHistory.filter((r) => r.final_risk >= 70).length;
   const highRiskPct = totalDetections > 0 ? Math.round((blockedThreats / totalDetections) * 100) : 0;
   const avgRiskScore = totalDetections > 0
-    ? Math.round(history.reduce((s, r) => s + r.final_risk, 0) / totalDetections)
+    ? Math.round(rangeHistory.reduce((s, r) => s + r.final_risk, 0) / totalDetections)
     : 0;
   const blockRate = totalDetections > 0 ? Math.round((blockedThreats / totalDetections) * 1000) / 10 : 0;
   const systemStatus = highRiskPct >= 50 ? "Critical" : highRiskPct >= 20 ? "Elevated" : "Stable";
@@ -247,7 +277,7 @@ const Dashboard: React.FC = () => {
     blockedThreats,
     avgRiskScore,
     highRiskPct,
-    activeThreats: history.filter((r) => r.final_risk >= 70).length,
+    activeThreats: rangeHistory.filter((r) => r.final_risk >= 70).length,
     detectionChange: 0,
     blockRate,
     systemStatus,
@@ -441,7 +471,7 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <Activity className="w-5 h-5 text-primary" />
-              <h3 className="text-lg font-semibold text-foreground">Weekly Phishing Detection</h3>
+              <h3 className="text-lg font-semibold text-foreground">Phishing Detection ({getDaysForRange(timeRange)} Days)</h3>
             </div>
             <div className="flex gap-4 text-xs">
               <div className="flex items-center gap-2">
@@ -597,7 +627,7 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <TrendingUp className="w-5 h-5 text-safe" />
-              <h3 className="text-lg font-semibold text-foreground">Threat Trends (6 Months)</h3>
+              <h3 className="text-lg font-semibold text-foreground">Threat Trends ({getDaysForRange(timeRange)} Days)</h3>
             </div>
             <div className="flex gap-4 text-xs">
               <div className="flex items-center gap-2">
@@ -674,6 +704,8 @@ const Dashboard: React.FC = () => {
             <select
               value={riskFilter}
               onChange={(e) => setRiskFilter(e.target.value as RiskFilter)}
+              aria-label="Filter scans by risk"
+              title="Filter scans by risk"
               className="bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             >
               <option value="all">All</option>
@@ -694,7 +726,7 @@ const Dashboard: React.FC = () => {
 
         {recentActivityChartData.some((d) => d.scans > 0) && (
           <div className="mb-6">
-            <h4 className="text-sm font-medium text-muted-foreground mb-3">Scans over last 7 days</h4>
+            <h4 className="text-sm font-medium text-muted-foreground mb-3">Scans over last {getDaysForRange(timeRange)} days</h4>
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={recentActivityChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} opacity={0.5} />
@@ -720,7 +752,9 @@ const Dashboard: React.FC = () => {
             <div className="py-8 text-center text-muted-foreground text-sm">Loading scan history...</div>
           ) : filteredHistory.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground text-sm">
-              {history.length === 0
+              {rangeHistory.length === 0
+                ? `No scans found in the selected time range (${timeRange === "7d" ? "7 Days" : timeRange === "30d" ? "30 Days" : "90 Days"}).`
+                : history.length === 0
                 ? "No scans yet. Run an analysis from the popup view."
                 : `No scans match the selected risk filter (${riskFilter}).`}
             </div>
