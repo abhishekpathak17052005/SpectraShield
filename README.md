@@ -27,7 +27,7 @@ SpectraShield/
 
 - Python 3.10+
 - Node.js 18+
-- MongoDB running locally on `mongodb://localhost:27017/`
+- Supabase project (PostgreSQL) for online database mode
 - Google Chrome (for extension testing)
 
 ## Quick Start
@@ -41,6 +41,22 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
+
+Create `backend/.env` before running backend:
+
+```env
+DB_BACKEND=postgres
+DATABASE_URL=postgresql://postgres:<password>@<host>:5432/postgres
+
+# Optional fallback mode
+# DB_BACKEND=mongo
+# MONGO_URI=mongodb://localhost:27017/
+# MONGO_DB_NAME=spectrashield_db
+```
+
+Apply SQL bootstrap in Supabase SQL editor:
+
+- [backend/sql/supabase_schema.sql](backend/sql/supabase_schema.sql)
 
 Backend runs at: `http://localhost:8000`
 
@@ -79,7 +95,7 @@ Use:
 
 - Do **not** commit virtual environments (`venv/`, `.venv/`).
 - Keep secrets and API keys out of git.
-- Current backend uses local MongoDB database: `spectrashield_db`.
+- Backend now supports both PostgreSQL (Supabase) and MongoDB via `DB_BACKEND`.
 
 ## License
 

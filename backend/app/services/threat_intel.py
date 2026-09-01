@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from pymongo import UpdateOne
 
 from app.database import threat_feed_collection
 
@@ -14,8 +13,7 @@ OPENPHISH_FEED_URL = "https://openphish.com/feed.txt"
 
 async def sync_openphish() -> dict[str, Any]:
     """
-    Fetch the OpenPhish plain-text feed and upsert into MongoDB collection `threat_feed`.
-    Uses a unique index on `url` to avoid duplicates.
+    Fetch the OpenPhish plain-text feed and upsert into `threat_feed`.
     """
     now = datetime.now(timezone.utc)
 
@@ -35,21 +33,19 @@ async def sync_openphish() -> dict[str, Any]:
     if not urls:
         return {"source": "openphish", "fetched": 0, "upserted": 0}
 
-    ops: list[UpdateOne] = []
+    upserted = 0
     for u in urls:
-        ops.append(
-            UpdateOne(
-                {"url": u},
-                {
-                    "$setOnInsert": {"url": u, "first_seen": now, "source": "openphish"},
-                    "$set": {"last_seen": now},
-                },
-                upsert=True,
-            )
+        result = threat_feed_collection.update_one(
+            {"url": u},
+            {
+                "$setOnInsert": {"url": u, "first_seen": now, "source": "openphish"},
+                "$set": {"last_seen": now},
+            },
+            upsert=True,
         )
+        if getattr(result, "upserted_id", None):
+            upserted += 1
 
-    result = threat_feed_collection.bulk_write(ops, ordered=False)
-    upserted = int(getattr(result, "upserted_count", 0))
     return {"source": "openphish", "fetched": len(urls), "upserted": upserted}
 
 

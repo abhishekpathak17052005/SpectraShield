@@ -2,6 +2,8 @@ fastapi
 uvicorn
 pydantic
 pymongo
+psycopg2-binary
+python-dotenv
 requests
 httpx
 tldextract
