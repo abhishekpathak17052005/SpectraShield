@@ -1,5 +1,35 @@
+# Python & Virtual Environments
 venv/
 .venv/
 backend/venv/
 backend/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+backend/app/__pycache__/
+backend/app/services/__pycache__/
+backend/app/utils/__pycache__/
+
+# Environment Variables & Secrets
+.env
+backend/.env
+frontend/.env
+*.env.local
+
+# Node.js & Frontend Build Artifacts
+node_modules/
 frontend/node_modules/
+dist/
+frontend/dist/
+.vite/
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+#Additional files
+struct.md
+spec.md
+upgrade-struct.md
