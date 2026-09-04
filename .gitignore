@@ -29,7 +29,13 @@ Thumbs.db
 .vscode/
 .idea/
 
-#Additional files
+# Additional files
 struct.md
 spec.md
 upgrade-struct.md
+*.pdf
+upgraded-spec.md 
+phase3.md 
+tools.md 
+new_design.md 
+universal-liquid-glass-design.md
