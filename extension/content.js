@@ -365,7 +365,67 @@
     });
 
     subjectEl.after(badge);
+    ensureForensicEscalationButton(badge, threadId, subjectEl);
     return badge;
+  }
+
+  function ensureForensicEscalationButton(badgeEl, threadId, subjectEl) {
+    if (!badgeEl || !badgeEl.parentNode || !threadId) return null;
+    var existing = badgeEl.parentNode.querySelector('.spectrashield-escalate-btn');
+    if (existing) return existing;
+
+    var btn = document.createElement('button');
+    btn.className = 'spectrashield-escalate-btn';
+    btn.style.marginLeft = '8px';
+    btn.style.padding = '2px 10px';
+    btn.style.borderRadius = '999px';
+    btn.style.fontSize = '11px';
+    btn.style.fontWeight = 'bold';
+    btn.style.fontFamily = 'monospace';
+    btn.style.background = '#DC2626';
+    btn.style.color = '#FFFFFF';
+    btn.style.border = '1px solid #EF4444';
+    btn.style.cursor = 'pointer';
+    btn.style.boxShadow = '0 2px 8px rgba(220, 38, 38, 0.3)';
+    btn.textContent = '🚨 Escalate to Forensic SOC';
+    btn.title = 'Dispatch headers & IOCs to SpectraShield 2.0 Evidence Vault';
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      btn.textContent = '⏳ Sealing Evidence...';
+      btn.disabled = true;
+
+      var context = (openMailCache[threadId] && openMailCache[threadId].context) || {};
+      var rawPayload = "Subject: " + (context.subject || (subjectEl && subjectEl.textContent) || '') + "\n" +
+        "From: " + (context.sender_email || 'unknown@domain.com') + "\n" +
+        (context.email_header || '') + "\n\n" +
+        (context.opened_mail_body || context.email_text || '');
+
+      fetch(API_BASE + '/api/forensics/analyze-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raw_eml: rawPayload,
+          subject: context.subject || (subjectEl && subjectEl.textContent),
+          sender_email: context.sender_email
+        })
+      })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        btn.textContent = '✓ Sealed: ' + (data.case_number || 'CASE-2026');
+        btn.style.background = '#059669';
+        btn.style.borderColor = '#10B981';
+        window.open('http://localhost:5173/?view=forensics&case_id=' + encodeURIComponent(data.case_id || ''), '_blank');
+      })
+      .catch(function () {
+        btn.textContent = '⚠️ Escalation Failed';
+        btn.disabled = false;
+      });
+    });
+
+    badgeEl.after(btn);
+    return btn;
   }
 
   function applyOpenBadgeState(badge, level, score, reason, breakdown) {

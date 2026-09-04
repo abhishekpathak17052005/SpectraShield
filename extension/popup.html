@@ -1,42 +1,198 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>SpectraShield AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpectraShield 2.0</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="container">
+  <div class="glass-app">
+    <!-- Top Ambient Caustic Flare -->
+    <div id="ambientCaustic" class="ambient-caustic"></div>
+
+    <!-- Top Liquid Header -->
     <header class="header">
-      <span class="logo">🛡 SpectraShield</span>
+      <div class="brand">
+        <div class="logo-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M12 8v4"/>
+            <path d="M12 16h.01"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">SpectraShield</span>
+          <span class="brand-badge">v2.0</span>
+        </div>
+      </div>
+      <button id="openSocNavBtn" class="nav-soc-btn" title="Open Forensic SOC Console">
+        SOC Console ↗
+      </button>
     </header>
 
-    <section class="form">
-      <label>Email content</label>
-      <textarea id="emailText" rows="4" placeholder="Paste email body or subject..."></textarea>
-      <label>Link (optional)</label>
-      <input type="text" id="url" placeholder="https://...">
-      <label>Sender (optional)</label>
-      <input type="text" id="sender" placeholder="sender@example.com">
-      <label class="checkbox">
-        <input type="checkbox" id="privateMode" checked> Private mode (don't store)
-      </label>
-      <button id="analyzeBtn">Analyze</button>
-    </section>
+    <!-- Main Content Body -->
+    <main class="content-body">
+      <!-- Input Form Section -->
+      <section id="formSection" class="form-section">
+        <div class="section-header">
+          <span class="section-title">Zero-Trust Threat Ingestion</span>
+          <button type="button" id="loadSampleBtn" class="sample-link">Load Sample BEC</button>
+        </div>
 
-    <section id="result" class="result hidden">
-      <div class="risk-row">
-        <span class="label">Risk</span>
-        <span id="riskValue" class="risk-value">—</span>
-      </div>
-      <div class="row"><span class="label">Verdict</span><span id="verdict">—</span></div>
-      <div class="row"><span class="label">Confidence</span><span id="confidence">—</span></div>
-      <div class="row"><span class="label">Threat</span><span id="category">—</span></div>
-      <p id="reasoning" class="reasoning"></p>
-    </section>
+        <div class="field-group">
+          <label for="emailText">Email Payload / Headers</label>
+          <textarea id="emailText" rows="3" placeholder="Paste email subject, body, or RFC 5322 headers..."></textarea>
+        </div>
 
-    <section id="error" class="error hidden"></section>
+        <div class="field-group">
+          <label for="url">Extracted URL (Optional)</label>
+          <div class="input-with-icon">
+            <span class="input-icon">🔗</span>
+            <input type="text" id="url" placeholder="https://secure-verify-account.tk/...">
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="sender">Sender Identity (Optional)</label>
+          <div class="input-with-icon">
+            <span class="input-icon">✉️</span>
+            <input type="text" id="sender" placeholder="executive-support@domain.com">
+          </div>
+        </div>
+
+        <div class="options-row">
+          <label class="toggle-control">
+            <input type="checkbox" id="privateMode" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Private Mode (Air-Gapped In-Memory)</span>
+          </label>
+        </div>
+
+        <button id="analyzeBtn" class="liquid-btn">
+          <span class="btn-sheen"></span>
+          <span class="btn-text">Execute Instant Threat Scan</span>
+        </button>
+      </section>
+
+      <!-- Results Section -->
+      <section id="result" class="result-section hidden">
+        <!-- Volumetric Circular Risk Gauge -->
+        <div class="gauge-card">
+          <div class="gauge-wrapper">
+            <svg class="gauge-svg" viewBox="0 0 140 140">
+              <circle class="gauge-bg" cx="70" cy="70" r="54" />
+              <circle id="gaugeCircle" class="gauge-fill" cx="70" cy="70" r="54" />
+            </svg>
+            <div class="gauge-center">
+              <span id="riskValue" class="risk-value">0%</span>
+              <span class="gauge-sub">RISK INDEX</span>
+            </div>
+          </div>
+
+          <div class="verdict-container">
+            <div id="verdictBadge" class="status-pill">
+              <span class="pulsing-dot"></span>
+              <span id="verdict">—</span>
+            </div>
+            <div class="confidence-text">
+              Confidence: <b id="confidence">—</b>
+            </div>
+          </div>
+        </div>
+
+        <!-- Target Brand Impersonation Tag -->
+        <div id="brandMatchBadge" class="brand-match-card hidden">
+          <span class="brand-match-label">🎯 Targeted Brand Impersonation:</span>
+          <span id="brandMatchName" class="brand-match-name">—</span>
+        </div>
+
+        <!-- Threat Category & Dissection -->
+        <div class="threat-card">
+          <div class="card-row">
+            <span class="card-label">Threat Classification</span>
+            <span id="category" class="card-value">—</span>
+          </div>
+          <p id="reasoning" class="reasoning-text"></p>
+        </div>
+
+        <!-- Heuristic Sub-Vector Bars -->
+        <div class="breakdown-card">
+          <span class="breakdown-title">Heuristic Threat Sub-Vectors</span>
+          
+          <div class="progress-item">
+            <div class="progress-info">
+              <span>URL & Domain Reputation</span>
+              <span id="barValUrl" class="val">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="barUrl" class="progress-fill crimson" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="progress-item">
+            <div class="progress-info">
+              <span>Cognitive Urgency & Manipulation</span>
+              <span id="barValManipulation" class="val">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="barManipulation" class="progress-fill amber" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="progress-item">
+            <div class="progress-info">
+              <span>Brand Mismatch / Homoglyph</span>
+              <span id="barValBrand" class="val">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="barBrand" class="progress-fill purple" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="progress-item">
+            <div class="progress-info">
+              <span>AI Generated Phish Patterns</span>
+              <span id="barValAi" class="val">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="barAi" class="progress-fill cyan" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Action Buttons -->
+        <div class="action-buttons-grid">
+          <button id="copyDefangedBtn" class="action-btn secondary">
+            <span>🛡️ Copy Defanged URL</span>
+          </button>
+          <button id="openSocBtn" class="action-btn primary">
+            <span>🔬 Escalate to SOC</span>
+          </button>
+        </div>
+
+        <button id="newScanBtn" class="new-scan-btn">
+          ← Start New Inspection
+        </button>
+      </section>
+
+      <!-- Error State Card -->
+      <section id="error" class="error-card hidden">
+        <div class="error-icon">⚠️</div>
+        <div class="error-content">
+          <div class="error-title">Inspection Exception</div>
+          <div id="errorMsg" class="error-message">Cannot reach SpectraShield backend.</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Status Bar -->
+    <footer class="footer">
+      <span id="backendBeacon" class="status-indicator live"></span>
+      <span id="backendStatusText" class="footer-text">SpectraShield 2.0 Engine • ISO/IEC 27037</span>
+    </footer>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
