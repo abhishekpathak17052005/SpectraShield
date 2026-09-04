@@ -9,3 +9,15 @@ httpx
 tldextract
 dnspython
 python-whois
+geoip2
+maxminddb
+authres
+mail-parser
+neo4j
+networkx
+datasketch
+reportlab
+qrcode
+pillow
+pytest
+python-multipart

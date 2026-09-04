@@ -938,7 +938,21 @@ def get_dashboard_risk_heatmap(
     }
 
 
+@app.get("/")
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "SpectraShield 2.0 (Forensic Edition)",
+        "version": "2.0.0-phase3",
+        "engine": "active"
+    }
+
+from app.forensic_routes import forensic_router
+
 app.include_router(router)
+app.include_router(forensic_router)
+
 
 
 async def _daily_pulse_loop():
