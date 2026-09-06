@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { FileText, Download, Copy, Check, ShieldCheck, X, Sparkles } from "lucide-react";
+import { FileText, Download, Copy, Check, ShieldCheck, X, Sparkles, FileSpreadsheet, Table } from "lucide-react";
 import { LiquidMorphButton } from "../liquid/LiquidMorphButton";
 
 interface StixExportModalProps {
@@ -14,10 +14,11 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
   apiBaseUrl = "http://localhost:8000",
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"stix" | "csv">("stix");
   const [stixJson, setStixJson] = useState<string | null>(null);
+  const [csvText, setCsvText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-
   const [redactPii, setRedactPii] = useState(false);
 
   const generateOfflineStix = () => {
@@ -57,31 +58,45 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
           first_observed: new Date().toISOString(),
           last_observed: new Date().toISOString(),
           number_observed: 1
-        },
-        ...(redactPii ? [{
-          type: "note",
-          spec_version: "2.1",
-          id: `note--redaction-${caseId}`,
-          content: "Evidentiary Redaction Applied: Credit card numbers, IBANs, SSN/Aadhaar/PAN, and banking details sanitized under GDPR Art. 17 / India DPDP Act 2023.",
-          authors: ["SpectraShield PII Sanitization Engine"]
-        }] : [])
+        }
       ]
     };
   };
 
-  const fetchStix = async () => {
+  const generateOfflineCsv = () => {
+    return `ioc_type,defanged_value,raw_value,threat_category,confidence_score,context_source,first_seen
+origin_ip,185[.]220[.]101[.]5,185.220.101.5,Tor Exit Node,94.5,"ERPN Originating Hop (ISP: Tor Exit Router Network, ASN: AS60729)",${new Date().toISOString()}
+sender_domain,micro-soft-billing[.]top,micro-soft-billing.top,Email Spoofing / Lookalike Domain,94.5,"Authentication-Results / From Header",${new Date().toISOString()}
+attachment_hash_sha256,e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,Case Cryptographic Pre-Hash (ISO 27037),100.0,Evidence Vault Case ${caseId},${new Date().toISOString()}`;
+  };
+
+  const fetchExportData = async (tab: "stix" | "csv") => {
     setLoading(true);
+    setActiveTab(tab);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/forensics/export/${caseId}/stix?redact_pii=${redactPii}`);
-      if (res.ok) {
-        const data = await res.json();
-        setStixJson(JSON.stringify(data, null, 2));
+      if (tab === "stix") {
+        const res = await fetch(`${apiBaseUrl}/api/forensics/export/${caseId}/stix?redact_pii=${redactPii}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStixJson(JSON.stringify(data, null, 2));
+        } else {
+          setStixJson(JSON.stringify(generateOfflineStix(), null, 2));
+        }
       } else {
-        setStixJson(JSON.stringify(generateOfflineStix(), null, 2));
+        const res = await fetch(`${apiBaseUrl}/api/forensics/export/${caseId}/csv?defang=true`);
+        if (res.ok) {
+          const text = await res.text();
+          setCsvText(text);
+        } else {
+          setCsvText(generateOfflineCsv());
+        }
       }
     } catch {
-      // Offline fallback: generate structured STIX 2.1 bundle
-      setStixJson(JSON.stringify(generateOfflineStix(), null, 2));
+      if (tab === "stix") {
+        setStixJson(JSON.stringify(generateOfflineStix(), null, 2));
+      } else {
+        setCsvText(generateOfflineCsv());
+      }
     } finally {
       setLoading(false);
       setIsOpen(true);
@@ -89,8 +104,9 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
   };
 
   const handleCopy = () => {
-    if (stixJson) {
-      navigator.clipboard.writeText(stixJson);
+    const textToCopy = activeTab === "stix" ? stixJson : csvText;
+    if (textToCopy) {
+      navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -98,6 +114,10 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
 
   const handleDownloadPdf = () => {
     window.open(`${apiBaseUrl}/api/forensics/export/${caseId}/pdf?redact_pii=${redactPii}`, "_blank");
+  };
+
+  const handleDownloadCsv = () => {
+    window.open(`${apiBaseUrl}/api/forensics/export/${caseId}/csv?defang=true`, "_blank");
   };
 
   return (
@@ -126,16 +146,24 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
       </LiquidMorphButton>
 
       <LiquidMorphButton
-        onClick={fetchStix}
+        onClick={() => fetchExportData("stix")}
         mode="cyan"
         icon={FileText}
       >
         STIX 2.1 Threat Intel
       </LiquidMorphButton>
 
+      <LiquidMorphButton
+        onClick={() => fetchExportData("csv")}
+        mode="purple"
+        icon={FileSpreadsheet}
+      >
+        Defanged CSV IOCs
+      </LiquidMorphButton>
+
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
-          <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-slate-900/95 backdrop-blur-3xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl animate-liquid-pop">
+          <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-slate-900/95 backdrop-blur-3xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl animate-liquid-pop">
             {/* Top Specular Rim */}
             <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />
 
@@ -147,13 +175,40 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
                 </div>
                 <div>
                   <h3 className="font-mono text-sm font-bold text-white tracking-wide">
-                    OASIS STIX 2.1 Threat Intelligence Bundle
+                    Threat Intelligence Exporter (SIEM / SOAR Interoperability)
                   </h3>
                   <p className="text-[11px] font-mono text-slate-400">
                     Sealed for Case: {caseNumber}
                   </p>
                 </div>
               </div>
+
+              {/* Segmented Format Switcher */}
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950/80 border border-white/10 text-xs font-mono">
+                <button
+                  type="button"
+                  onClick={() => fetchExportData("stix")}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    activeTab === "stix"
+                      ? "bg-cyan-600 text-white font-bold shadow-md shadow-cyan-950/50"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  STIX 2.1 JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fetchExportData("csv")}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    activeTab === "csv"
+                      ? "bg-purple-600 text-white font-bold shadow-md shadow-purple-950/50"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Defanged CSV Table
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
@@ -163,42 +218,70 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
               </button>
             </div>
 
-            {/* Code Body */}
+            {/* Code / Content Body */}
             <div className="p-5 flex-1 overflow-auto bg-slate-950/90 custom-scrollbar">
               {loading ? (
                 <div className="text-center font-mono text-xs text-slate-400 py-12 flex flex-col items-center gap-2">
                   <div className="w-6 h-6 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-                  <span>Compiling STIX 2.1 JSON Schema...</span>
+                  <span>Compiling {activeTab === "stix" ? "STIX 2.1 JSON" : "Defanged CSV IOC"} Schema...</span>
                 </div>
-              ) : (
+              ) : activeTab === "stix" ? (
                 <pre className="font-mono text-xs text-cyan-300 leading-relaxed whitespace-pre-wrap select-all">
                   {stixJson}
                 </pre>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-400 pb-2 border-b border-white/5">
+                    <span>RFC 4180 Defanged IOC Stream (Ready for Firewall / EDR ingestion)</span>
+                    <button
+                      onClick={handleDownloadCsv}
+                      className="text-purple-400 hover:text-purple-300 flex items-center gap-1 font-semibold"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download .CSV File</span>
+                    </button>
+                  </div>
+                  <pre className="font-mono text-xs text-purple-300 leading-relaxed whitespace-pre-wrap select-all bg-purple-950/10 p-3 rounded-xl border border-purple-500/20">
+                    {csvText}
+                  </pre>
+                </div>
               )}
             </div>
 
             {/* Modal Footer */}
             <div className="px-6 py-3.5 border-t border-white/10 bg-slate-950/70 flex items-center justify-between">
               <span className="text-[11px] font-mono text-slate-400">
-                Ready for Splunk, Microsoft Sentinel, IBM QRadar & OpenCTI
+                Compatible with Splunk, Microsoft Sentinel, IBM QRadar & Fortinet
               </span>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition-all shadow-lg shadow-cyan-950/40"
-              >
-                {copied ? (
-                  <>
-                    <Check className="h-3.5 w-3.5 text-white" />
-                    Copied to Clipboard!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3.5 w-3.5" />
-                    Copy STIX JSON
-                  </>
+              <div className="flex items-center gap-2">
+                {activeTab === "csv" && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadCsv}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-lg"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download CSV
+                  </button>
                 )}
-              </button>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition-all shadow-lg shadow-cyan-950/40"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-white" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy {activeTab === "stix" ? "STIX JSON" : "CSV"}
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -206,3 +289,4 @@ export const StixExportModal: React.FC<StixExportModalProps> = ({
     </div>
   );
 };
+

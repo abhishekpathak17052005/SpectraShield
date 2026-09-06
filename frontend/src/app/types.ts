@@ -252,6 +252,18 @@ export interface AttachmentEvidence {
   has_embedded_scripts: boolean;
   risk_level: 'clean' | 'suspicious' | 'malicious' | string;
   risk_reasons: string[];
+  quarantine_path?: string | null;
+  is_quarantined?: boolean;
+}
+
+export interface QuishingEvidence {
+  has_qr_code: boolean;
+  qr_count: number;
+  decoded_payloads: string[];
+  defanged_payloads: string[];
+  risk_level: 'clean' | 'suspicious' | 'malicious' | string;
+  source_image_filename?: string | null;
+  extracted_urls: string[];
 }
 
 export interface CaseNote {
@@ -276,6 +288,28 @@ export interface CaseRecord {
   updated_at: string;
 }
 
+export interface HomoglyphChar {
+  index: number;
+  raw_char: string;
+  lookalike_char: string;
+  unicode_hex: string;
+  script: string;
+  char_name?: string;
+}
+
+export interface HomoglyphAnalysis {
+  has_homoglyphs: boolean;
+  is_punycode: boolean;
+  raw_domain: string;
+  punycode_ascii?: string | null;
+  normalized_ascii: string;
+  target_brand?: string | null;
+  target_domain?: string | null;
+  substituted_characters: HomoglyphChar[];
+  risk_score_modifier: number;
+  verdict: string;
+}
+
 export interface ForensicAnalyzeResponse {
   case_id: string;
   case_number: string;
@@ -296,8 +330,81 @@ export interface ForensicAnalyzeResponse {
   mitre_tactics: string[];
   attack_simulation?: unknown[];
   anomalies: string[];
+  homoglyph_analysis?: HomoglyphAnalysis;
+  quishing_evidence?: QuishingEvidence;
+  cti_reputation?: CtiReputationRecord[];
+  dkim_verification?: DkimVerificationDetails;
+  transformer_nlp?: TransformerNlpResult;
+  ingestion_format?: string;
+  sanitized_html?: string;
+  script_cues?: string[];
   created_at: string;
 }
+
+// --- Phase 7: External Threat Feeds, Active DNS DKIM & Transformer Intelligence Types ---
+
+export interface CtiReputationRecord {
+  source: string;
+  indicator: string;
+  indicator_type: 'IP' | 'DOMAIN' | 'URL' | string;
+  is_malicious: boolean;
+  confidence_score: number;
+  threat_category?: string | null;
+  asn_isp?: string | null;
+  country?: string | null;
+  vpn_detected?: boolean;
+  vpn_provider?: string | null;
+  last_reported?: string | null;
+  details?: Record<string, unknown>;
+}
+
+export interface DkimVerificationDetails {
+  selector?: string | null;
+  signing_domain?: string | null;
+  key_length_bits: number;
+  algorithm: string;
+  body_hash_valid: boolean;
+  signature_math_valid: boolean;
+  dns_key_published: boolean;
+  raw_public_key?: string | null;
+  verification_status: 'PASS' | 'FAIL' | 'NONE' | string;
+  reason?: string | null;
+}
+
+export interface TransformerNlpResult {
+  top_intent: string;
+  confidence: number;
+  intent_probabilities: Record<string, number>;
+  vip_impersonation: boolean;
+  targeted_vip?: string | null;
+  targeted_title?: string | null;
+  vip_risk_level: string;
+  explanation: string;
+}
+
+export interface ThreatCommunityCluster {
+  community_id: number;
+  syndicate_name: string;
+  node_count: number;
+  density: number;
+  dominant_threat_actor: string;
+  dominant_category: string;
+  nodes: string[];
+}
+
+export interface LouvainCommunitiesResponse {
+  modularity: number;
+  syndicates_count: number;
+  communities: ThreatCommunityCluster[];
+}
+
+export interface VipRosterEntry {
+  name: string;
+  title: string;
+  authorized_domains: string[];
+  authorized_emails: string[];
+}
+
 
 // --- React Flow Threat Graph Types ---
 
@@ -315,3 +422,59 @@ export interface ThreatGraphEdgeData {
   type?: string;
   confidence?: number;
 }
+
+// --- Phase 6: Enterprise Identity & 4-Tier RBAC Types ---
+
+export type EnterpriseRole = 'SUPER_ADMIN' | 'FORENSIC_ANALYST' | 'SOC_OPERATOR' | 'AUDITOR';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  role: EnterpriseRole;
+  totp_enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+  last_login?: string | null;
+  is_demo_fallback?: boolean;
+}
+
+export interface AuthSession {
+  user: UserProfile;
+  access_token: string;
+  refresh_token: string;
+  permissions: string[];
+}
+
+export interface Setup2FAResponse {
+  secret: string;
+  qr_code_base64: string;
+  provisioning_uri: string;
+  manual_entry_key: string;
+  user_email: string;
+  message: string;
+}
+
+export interface Verify2FAResponse {
+  status: string;
+  message: string;
+  totp_enabled: boolean;
+  access_token?: string;
+  refresh_token?: string;
+  user?: UserProfile;
+  permissions?: string[];
+}
+
+export interface LoginResponse {
+  status: string;
+  requires_2fa: boolean;
+  temp_token?: string;
+  user_id?: string;
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  user?: UserProfile;
+  permissions?: string[];
+  message?: string;
+}
+

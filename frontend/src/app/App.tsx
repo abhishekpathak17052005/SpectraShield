@@ -8,6 +8,9 @@ import { LinkPreviewView } from './components/views/LinkPreviewView';
 import { SentinelInboxesView } from './components/views/SentinelInboxesView';
 import { ExtensionPopupView } from './components/views/ExtensionPopupView';
 import { StyleGuideView } from './components/views/StyleGuideView';
+import { AuthProvider } from './context/AuthContext';
+import { LoginModal } from './components/auth/LoginModal';
+import { UserProfileDrawer } from './components/auth/UserProfileDrawer';
 
 const AppContent: React.FC = () => {
   const [activeView, setActiveView] = useState<string>('dashboard');
@@ -130,6 +133,10 @@ const AppContent: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      {/* Universal Liquid Glass Identity Modals */}
+      <LoginModal />
+      <UserProfileDrawer />
     </div>
   );
 };
@@ -137,7 +144,9 @@ const AppContent: React.FC = () => {
 export default function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

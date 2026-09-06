@@ -3,6 +3,7 @@ import { ShieldAlert, Menu, X, Clock, ShieldCheck, Sparkles } from 'lucide-react
 import { LiquidSegmentedControl, SegmentOption } from '../liquid/LiquidSegmentedControl';
 import { ThemeToggle } from './ThemeToggle';
 import { checkBackendHealth } from '../../api';
+import { useAuth } from '../../context/AuthContext';
 
 interface CyberNavbarProps {
   activeView: string;
@@ -20,6 +21,7 @@ export const CyberNavbar: React.FC<CyberNavbarProps> = ({
   const [isClosing, setIsClosing] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [isBackendLive, setIsBackendLive] = useState(true);
+  const { user, role, openProfileDrawer } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 15);
@@ -133,6 +135,31 @@ export const CyberNavbar: React.FC<CyberNavbarProps> = ({
               </span>
             </div>
 
+            {/* Enterprise Identity Chip & Role Switcher */}
+            <button
+              type="button"
+              onClick={openProfileDrawer}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-slate-900/80 border border-white/10 hover:border-cyan-500/40 text-xs font-mono transition-all duration-300 select-none group shadow-sm hover:shadow-[0_0_15px_rgba(6,182,212,0.2)] cursor-pointer"
+              title="Click to view Analyst Dossier, switch roles, or configure 2FA"
+            >
+              <div className="w-5 h-5 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-[10px] font-bold text-cyan-300">
+                {user?.name ? user.name.charAt(0) : 'A'}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-white hidden md:inline font-semibold max-w-[100px] truncate">
+                  {user?.name?.split(' ')[0] || 'Analyst'}
+                </span>
+                <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
+                  role === 'SUPER_ADMIN' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                  role === 'FORENSIC_ANALYST' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                  role === 'SOC_OPERATOR' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
+                  'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+                }`}>
+                  {role.replace('_', ' ')}
+                </span>
+              </div>
+            </button>
+
             {/* Theme Switcher */}
             <ThemeToggle />
 
@@ -169,6 +196,28 @@ export const CyberNavbar: React.FC<CyberNavbarProps> = ({
               </div>
               <span className="text-[10px] font-mono text-slate-400">
                 {currentTime}
+              </span>
+            </div>
+
+            {/* Mobile User Identity Card */}
+            <div
+              onClick={() => {
+                closeMobileMenu();
+                openProfileDrawer();
+              }}
+              className="p-3 rounded-2xl bg-slate-800/80 border border-white/10 flex items-center justify-between cursor-pointer hover:border-cyan-500/40 mb-3"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-xs font-bold text-cyan-300">
+                  {user?.name ? user.name.charAt(0) : 'A'}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">{user?.name || 'Forensic Specialist'}</div>
+                  <div className="text-[10px] font-mono text-slate-400">{user?.email || 'analyst@spectrashield.soc'}</div>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                {role.replace('_', ' ')}
               </span>
             </div>
 

@@ -13,6 +13,18 @@ import {
   ForensicAnalyzeRequest,
   ForensicAnalyzeResponse,
   CaseRecord,
+  UserProfile,
+  AuthSession,
+  LoginResponse,
+  Setup2FAResponse,
+  Verify2FAResponse,
+  EnterpriseRole,
+  CtiReputationRecord,
+  DkimVerificationDetails,
+  TransformerNlpResult,
+  ThreatCommunityCluster,
+  LouvainCommunitiesResponse,
+  VipRosterEntry,
 } from './types';
 
 export const getApiBase = (): string => {
@@ -191,8 +203,89 @@ export const MOCK_FORENSIC_ANALYSIS: ForensicAnalyzeResponse = {
   anomalies: [
     "RFC 1918 Bogon IP 10.0.0.15 discarded from physical geolocation resolution.",
     "Earliest Reliable Public Node (ERPN) isolated at Hop #2 (185.220.101.5).",
-    "Sender envelope return-path mismatch with visible RFC 5322 From: address."
+    "Sender envelope return-path mismatch with visible RFC 5322 From: address.",
+    "Unicode Homoglyph Spoofing detected: micro-soft-billing.top mimics MICROSOFT"
   ],
+  homoglyph_analysis: {
+    has_homoglyphs: true,
+    is_punycode: false,
+    raw_domain: "micrоsoft-billing.top",
+    punycode_ascii: null,
+    normalized_ascii: "microsoft-billing.top",
+    target_brand: "microsoft",
+    target_domain: "microsoft.com",
+    substituted_characters: [
+      {
+        index: 4,
+        raw_char: "о",
+        lookalike_char: "o",
+        unicode_hex: "U+043E",
+        script: "Cyrillic",
+        char_name: "CYRILLIC SMALL LETTER O"
+      }
+    ],
+    risk_score_modifier: 50.0,
+    verdict: "Critical Homoglyph Spoofing (MICROSOFT)"
+  },
+  cti_reputation: [
+    {
+      source: "AbuseIPDB",
+      indicator: "185.220.101.5",
+      indicator_type: "IP",
+      is_malicious: true,
+      confidence_score: 98,
+      threat_category: "Known Tor Exit Node / Scanner",
+      asn_isp: "Zwiebelfreunde e.V.",
+      country: "DE",
+      vpn_detected: true,
+      vpn_provider: "Tor Exit Node Network"
+    },
+    {
+      source: "abuse.ch URLhaus",
+      indicator: "hxxps://micro-soft-billing[.]top/auth/login",
+      indicator_type: "URL",
+      is_malicious: true,
+      confidence_score: 95,
+      threat_category: "Credential Harvester / Phish"
+    },
+    {
+      source: "Google Safe Browsing",
+      indicator: "micro-soft-billing.top",
+      indicator_type: "DOMAIN",
+      is_malicious: true,
+      confidence_score: 90,
+      threat_category: "SOCIAL_ENGINEERING"
+    }
+  ],
+  dkim_verification: {
+    selector: "default",
+    signing_domain: "micro-soft-billing.top",
+    key_length_bits: 2048,
+    algorithm: "rsa-sha256",
+    body_hash_valid: false,
+    signature_math_valid: false,
+    dns_key_published: true,
+    raw_public_key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzqX...",
+    verification_status: "FAIL",
+    reason: "Cryptographic Body Hash Mismatch (Possible Message Tampering)"
+  },
+  transformer_nlp: {
+    top_intent: "FINANCIAL_WIRE_FRAUD",
+    confidence: 0.942,
+    intent_probabilities: {
+      "FINANCIAL_WIRE_FRAUD": 0.942,
+      "EXECUTIVE_IMPERSONATION": 0.885,
+      "CREDENTIAL_HARVESTING": 0.120,
+      "INVOICE_SUPPLIER_FRAUD": 0.654,
+      "EXTORTION_BLACKMAIL": 0.041,
+      "CLEAN_BENIGN": 0.012
+    },
+    vip_impersonation: true,
+    targeted_vip: "Satya Nadella",
+    targeted_title: "Chief Executive Officer",
+    vip_risk_level: "CRITICAL",
+    explanation: "Deep transformer detected executive financial wire diversion cues paired with display name impersonation targeting CEO."
+  },
   created_at: new Date().toISOString()
 };
 
@@ -498,6 +591,12 @@ export async function uploadEmlFile(file: File): Promise<ForensicAnalyzeResponse
   return MOCK_FORENSIC_ANALYSIS;
 }
 
+export function getQuarantineDownloadUrl(caseId: string, sha256: string): string {
+  const base = getApiBase();
+  return `${base}/api/forensics/cases/${encodeURIComponent(caseId)}/quarantine/${encodeURIComponent(sha256)}`;
+}
+
+
 export async function getCampaignGraph(campaignId: string): Promise<any> {
   const base = getApiBase();
   try {
@@ -561,12 +660,48 @@ export async function getCases(params?: { limit?: number; status?: string }): Pr
   };
 }
 
+// ==========================================
+// ENTERPRISE IDENTITY & AUTHENTICATION STATE
+// ==========================================
+
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+  if (typeof window !== "undefined") {
+    if (token) {
+      try { localStorage.setItem("spectrashield_jwt", token); } catch {}
+    } else {
+      try { localStorage.removeItem("spectrashield_jwt"); } catch {}
+    }
+  }
+}
+
+export function getAuthToken(): string | null {
+  if (!_authToken && typeof window !== "undefined") {
+    try { _authToken = localStorage.getItem("spectrashield_jwt"); } catch {}
+  }
+  return _authToken;
+}
+
+export function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...extraHeaders
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function updateCaseStatus(caseId: string, status: string, actor: string = "SOC Analyst", reason: string = ""): Promise<any> {
   const base = getApiBase();
   try {
     const res = await fetch(`${base}/api/forensics/cases/${encodeURIComponent(caseId)}/status`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ status, actor, reason })
     });
     if (res.ok) return await res.json();
@@ -581,7 +716,7 @@ export async function addCaseNote(caseId: string, text: string, author: string =
   try {
     const res = await fetch(`${base}/api/forensics/cases/${encodeURIComponent(caseId)}/notes`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ text, author })
     });
     if (res.ok) return await res.json();
@@ -596,7 +731,7 @@ export async function assignCase(caseId: string, analyst: string, actor: string 
   try {
     const res = await fetch(`${base}/api/forensics/cases/${encodeURIComponent(caseId)}/assign`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ analyst, actor })
     });
     if (res.ok) return await res.json();
@@ -641,4 +776,289 @@ export async function getMailboxStatus(): Promise<any> {
     last_poll: new Date().toISOString()
   };
 }
+
+export function exportCaseCsvUrl(caseId: string, defang: boolean = true): string {
+  return `${getApiBase()}/api/forensics/export/${encodeURIComponent(caseId)}/csv?defang=${defang}`;
+}
+
+// ==========================================
+// PHASE 6: ENTERPRISE IDENTITY & AUTH METHODS
+// ==========================================
+
+export async function loginUser(email: string, password: string): Promise<LoginResponse> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Authentication failed");
+    }
+    if (data.access_token) {
+      setAuthToken(data.access_token);
+    }
+    return data;
+  } catch (err: any) {
+    if (err.message && err.message !== "Failed to fetch") {
+      throw err;
+    }
+    // Offline simulation fallback
+    const role: EnterpriseRole = email.includes("admin") ? "SUPER_ADMIN" : "FORENSIC_ANALYST";
+    const mockUser: UserProfile = {
+      id: "usr-demo-local",
+      email,
+      name: email.split("@")[0].toUpperCase(),
+      role,
+      totp_enabled: false,
+      is_demo_fallback: true
+    };
+    return {
+      status: "SUCCESS",
+      requires_2fa: false,
+      access_token: "mock-jwt-token",
+      refresh_token: "mock-refresh-token",
+      user: mockUser,
+      permissions: ["cases:read", "cases:write", "analysis:execute"]
+    };
+  }
+}
+
+export async function setup2FA(): Promise<Setup2FAResponse> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/2fa/setup`, {
+    method: "POST",
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to setup 2FA");
+  }
+  return await res.json();
+}
+
+export async function verify2FA(code: string, secret?: string, tempToken?: string): Promise<Verify2FAResponse> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/2fa/verify`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ code, secret, temp_token: tempToken })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || "2FA verification failed");
+  }
+  if (data.access_token) {
+    setAuthToken(data.access_token);
+  }
+  return data;
+}
+
+export async function disable2FA(code: string): Promise<any> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/2fa/disable`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ code })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to disable 2FA");
+  }
+  return await res.json();
+}
+
+export async function fetchCurrentUser(): Promise<{ user: UserProfile; permissions: string[]; is_demo_fallback?: boolean }> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/auth/me`, {
+      method: "GET",
+      headers: getAuthHeaders()
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    // Offline fallback
+  }
+  return {
+    user: {
+      id: "usr-fallback",
+      email: "analyst@spectrashield.soc",
+      name: "Lead Forensic Investigator",
+      role: "FORENSIC_ANALYST",
+      totp_enabled: false,
+      is_demo_fallback: true
+    },
+    permissions: ["cases:read", "cases:write", "cases:assign", "cases:status", "analysis:execute", "sandbox:execute", "reports:generate", "audit:read"],
+    is_demo_fallback: true
+  };
+}
+
+export async function simulateRole(role: EnterpriseRole): Promise<any> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/auth/simulate-role`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to simulate role");
+    if (data.access_token) {
+      setAuthToken(data.access_token);
+    }
+    return data;
+  } catch (err: any) {
+    if (err.message && err.message !== "Failed to fetch") throw err;
+    // Offline simulation
+    const mockUser: UserProfile = {
+      id: `usr-sim-${role.toLowerCase()}`,
+      email: `${role.toLowerCase()}@spectrashield.soc`,
+      name: `${role.replace("_", " ")}`,
+      role,
+      totp_enabled: false,
+      is_demo_fallback: true
+    };
+    return {
+      status: "SUCCESS",
+      simulated_role: role,
+      access_token: "mock-sim-token",
+      refresh_token: "mock-sim-refresh",
+      user: mockUser,
+      permissions: ["cases:read", "analysis:execute"]
+    };
+  }
+}
+
+export async function fetchEnterpriseUsers(): Promise<UserProfile[]> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/auth/users`, {
+      headers: getAuthHeaders()
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.users || [];
+    }
+  } catch {}
+  return [];
+}
+
+export async function logoutUser(): Promise<void> {
+  const base = getApiBase();
+  try {
+    await fetch(`${base}/api/auth/logout`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+  } catch {}
+  setAuthToken(null);
+}
+
+// ==========================================
+// PHASE 7: CTI, DKIM & TRANSFORMER INTELLIGENCE APIS
+// ==========================================
+
+export async function lookupCti(query: string): Promise<CtiReputationRecord[]> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/forensics/cti/lookup?query=${encodeURIComponent(query)}`, {
+      headers: getAuthHeaders()
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.records || [];
+    }
+  } catch {}
+  return [
+    {
+      source: "AbuseIPDB",
+      indicator: query,
+      indicator_type: query.includes("http") ? "URL" : (query.includes(".") && !query.match(/[a-z]/i) ? "IP" : "DOMAIN"),
+      is_malicious: query.includes("185.220") || query.includes("suspicious"),
+      confidence_score: query.includes("185.220") ? 98 : 15,
+      threat_category: "Known Tor Exit Node / Scanner",
+      asn_isp: "Zwiebelfreunde e.V.",
+      country: "DE",
+      vpn_detected: query.includes("185.220"),
+      vpn_provider: "Tor Exit Node Network"
+    }
+  ];
+}
+
+export async function fetchCampaignCommunities(): Promise<LouvainCommunitiesResponse> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/forensics/campaigns/communities`, {
+      headers: getAuthHeaders()
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {}
+  return {
+    modularity: 0.742,
+    syndicates_count: 2,
+    communities: [
+      {
+        community_id: 0,
+        syndicate_name: "SYNDICATE-FIN7-M365",
+        node_count: 5,
+        density: 0.85,
+        dominant_threat_actor: "FIN7 / Carbanak",
+        dominant_category: "Business Email Compromise (BEC)",
+        nodes: ["micro-soft-billing.top", "185.220.101.5", "CASE-2026-0891", "CAMPAIGN-01", "CEO Fraud"]
+      },
+      {
+        community_id: 1,
+        syndicate_name: "SYNDICATE-STORM-0829",
+        node_count: 4,
+        density: 0.72,
+        dominant_threat_actor: "Storm-0829",
+        dominant_category: "Credential Harvesting",
+        nodes: ["login-secure-auth.xyz", "194.26.29.112", "CASE-2026-0892", "Office365 Phish"]
+      }
+    ]
+  };
+}
+
+export async function fetchVipRoster(): Promise<VipRosterEntry[]> {
+  const base = getApiBase();
+  try {
+    const res = await fetch(`${base}/api/forensics/vip-roster`, {
+      headers: getAuthHeaders()
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.roster || [];
+    }
+  } catch {}
+  return [
+    { name: "Satya Nadella", title: "Chief Executive Officer", authorized_domains: ["microsoft.com"], authorized_emails: ["satya@microsoft.com"] },
+    { name: "Amy Hood", title: "Chief Financial Officer", authorized_domains: ["microsoft.com"], authorized_emails: ["amy.hood@microsoft.com"] },
+    { name: "Sundar Pichai", title: "Chief Executive Officer", authorized_domains: ["google.com", "alphabet.com"], authorized_emails: ["sundar@google.com"] },
+    { name: "Tim Cook", title: "Chief Executive Officer", authorized_domains: ["apple.com"], authorized_emails: ["tcook@apple.com"] }
+  ];
+}
+
+export async function addVipRosterEntry(entry: VipRosterEntry): Promise<VipRosterEntry> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/forensics/vip-roster`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders()
+    },
+    body: JSON.stringify(entry)
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to add VIP roster entry");
+  }
+  return await res.json();
+}
+
+
+
 

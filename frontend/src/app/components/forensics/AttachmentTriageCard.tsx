@@ -5,12 +5,15 @@ import {
   AlertTriangle,
   ShieldAlert,
   ShieldCheck,
+  Shield,
+  Download,
   Copy,
   Check,
   Hash,
   Binary,
   Layers
 } from "lucide-react";
+import { getQuarantineDownloadUrl } from "../../api";
 
 export interface AttachmentEvidenceData {
   filename: string;
@@ -26,13 +29,19 @@ export interface AttachmentEvidenceData {
   has_embedded_scripts: boolean;
   risk_level: string; // "clean" | "suspicious" | "malicious"
   risk_reasons: string[];
+  quarantine_path?: string | null;
+  is_quarantined?: boolean;
 }
 
 interface AttachmentTriageCardProps {
   attachments?: AttachmentEvidenceData[];
+  caseId?: string;
 }
 
-export const AttachmentTriageCard: React.FC<AttachmentTriageCardProps> = ({ attachments = [] }) => {
+export const AttachmentTriageCard: React.FC<AttachmentTriageCardProps> = ({
+  attachments = [],
+  caseId
+}) => {
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   const handleCopy = (hashText: string, id: string) => {
@@ -133,6 +142,12 @@ export const AttachmentTriageCard: React.FC<AttachmentTriageCardProps> = ({ atta
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {att.is_quarantined && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+                      <Shield className="w-3 h-3 text-purple-400" />
+                      QUARANTINED
+                    </span>
+                  )}
                   <span
                     className={`px-3 py-1 rounded-full text-xs font-mono font-bold uppercase tracking-wider ${
                       isMalicious
@@ -262,10 +277,29 @@ export const AttachmentTriageCard: React.FC<AttachmentTriageCardProps> = ({ atta
                     <code className="text-purple-300">{att.fuzzy_hash}</code>
                   </div>
                 )}
+
+                {caseId && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                    <div className="text-[11px] font-mono text-purple-300 flex items-center gap-1.5">
+                      <Shield className="w-3 h-3 text-purple-400" />
+                      <span>Evidentiary Disk Isolation (.quarantine)</span>
+                    </div>
+                    <a
+                      href={getQuarantineDownloadUrl(caseId, att.sha256)}
+                      download={`${att.sha256}.quarantine`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold bg-purple-950/70 hover:bg-purple-900/90 text-purple-200 border border-purple-500/30 hover:border-purple-500/60 transition-colors shadow-sm"
+                      title="Safely download quarantined payload with .quarantine extension"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Quarantine</span>
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           );
         })}
+
       </div>
     </div>
   );

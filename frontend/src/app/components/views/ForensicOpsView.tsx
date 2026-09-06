@@ -18,6 +18,9 @@ import {
   Globe,
   FileCode,
   Clock,
+  KeyRound,
+  Users,
+  Radio,
 } from 'lucide-react';
 import { LiquidGlassCard } from '../liquid/LiquidGlassCard';
 import { LiquidMorphButton } from '../liquid/LiquidMorphButton';
@@ -32,6 +35,10 @@ import { AuthStatusMatrix } from '../forensics/AuthStatusMatrix';
 import { AttachmentTriageCard } from '../forensics/AttachmentTriageCard';
 import { CaseManagementView } from '../forensics/CaseManagementView';
 import { StixExportModal } from '../forensics/StixExportModal';
+import { HomoglyphDiffChip } from '../forensics/HomoglyphDiffChip';
+import { QuishingPreviewCard } from '../forensics/QuishingPreviewCard';
+import { CtiReputationMatrix } from '../forensics/CtiReputationMatrix';
+import { VipRosterModal } from '../forensics/VipRosterModal';
 import { analyzeForensicEmail, uploadEmlFile, MOCK_FORENSIC_ANALYSIS, ForensicAnalyzeResponse, getApiBase } from '../../api';
 
 const SAMPLE_BEC_HEADERS = `Received: from relay.attacker-infra.net (relay.attacker-infra.net [185.220.101.5])
@@ -60,6 +67,7 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
   const [xaiOpen, setXaiOpen] = useState(true);
   const [dragActive, setDragActive] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('dissection');
+  const [showVipModal, setShowVipModal] = useState<boolean>(false);
 
   const handleRunAnalysis = async () => {
     setLoading(true);
@@ -119,11 +127,21 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
           </p>
         </div>
 
-        {/* Evidence Export Actions */}
-        <StixExportModal
-          caseId={analysis.case_id}
-          caseNumber={analysis.case_number}
-        />
+        {/* Evidence Export & VIP Defense Actions */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowVipModal(true)}
+            className="px-3.5 py-2 rounded-xl text-xs font-mono font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all flex items-center gap-2 shadow-[0_0_12px_rgba(245,158,11,0.2)]"
+          >
+            <Users className="w-4 h-4" />
+            <span>VIP Roster (NLP-03)</span>
+          </button>
+          <StixExportModal
+            caseId={analysis.case_id}
+            caseNumber={analysis.case_number}
+          />
+        </div>
       </div>
 
       {/* Sealed Evidence Vault Header Bar */}
@@ -143,6 +161,11 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
                   label={analysis.verdict}
                   size="sm"
                 />
+                {analysis.ingestion_format && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                    {analysis.ingestion_format.replace(/_/g, ' ')}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Threat Classification: <span className="text-red-400 font-semibold">{analysis.threat_category}</span>
@@ -238,15 +261,20 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
               />
 
               <div className="px-4 py-2.5 border-t border-white/5 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-slate-400">
-                <div className="flex items-center gap-2">
-                  <UploadCloud className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Or drag & drop .eml / .msg file directly into this zone</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <UploadCloud className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Drag & drop evidence directly:</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">.EML</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">.MSG (Outlook)</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">.MBOX</span>
+                  </div>
                 </div>
                 <label className="cursor-pointer text-cyan-300 hover:text-cyan-200 font-semibold underline">
                   Browse file
                   <input
                     type="file"
-                    accept=".eml,.msg,.txt"
+                    accept=".eml,.msg,.mbox,.txt"
                     className="hidden"
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
@@ -256,6 +284,7 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
                   />
                 </label>
               </div>
+
             </div>
 
             <div className="flex justify-end pt-2">
@@ -270,6 +299,20 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
             </div>
           </LiquidGlassCard>
 
+          {/* Phase 5: Quishing 2D Matrix Phishing Preview Card */}
+          {analysis.quishing_evidence && analysis.quishing_evidence.has_qr_code && (
+            <div className="space-y-2">
+              <QuishingPreviewCard quishing={analysis.quishing_evidence} />
+            </div>
+          )}
+
+          {/* Phase 4: Unicode Homoglyph & Punycode Visual Substitution Inspector */}
+          {analysis.homoglyph_analysis && analysis.homoglyph_analysis.has_homoglyphs && (
+            <div className="space-y-2">
+              <HomoglyphDiffChip homoglyphData={analysis.homoglyph_analysis} />
+            </div>
+          )}
+
           {/* Cryptographic DNS Authentication Status Matrix */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -281,10 +324,94 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
             <AuthStatusMatrix authentication={analysis.authentication} />
           </div>
 
-          {/* Static Attachment Triage Stream (Phase 3) */}
+          {/* Standalone Active DKIM RSA Cryptographic Verification (Phase 7 HDR-03-DNS) */}
+          {analysis.dkim_verification && (
+            <LiquidGlassCard
+              glowColor={analysis.dkim_verification.verification_status === "PASS" ? "emerald" : "crimson"}
+              className="p-5 space-y-3"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-400">
+                    <KeyRound className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-white tracking-wide">
+                        STANDALONE ACTIVE DNS DKIM RSA CRYPTOGRAPHIC ENGINE
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                        HDR-03-DNS
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      RFC 6376 direct DNS TXT extraction (<span className="text-cyan-300">{analysis.dkim_verification.selector || "selector"}._domainkey.{analysis.dkim_verification.signing_domain || "domain"}</span>) & RSA-SHA256 signature verification
+                    </p>
+                  </div>
+                </div>
+
+                <LiquidGlassBadge
+                  variant={analysis.dkim_verification.verification_status === "PASS" ? "safe" : "critical"}
+                  label={analysis.dkim_verification.verification_status}
+                  size="sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-white/5 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">Signing Domain / Selector:</span>
+                  <span className="text-white font-semibold">
+                    {analysis.dkim_verification.signing_domain || "N/A"} ({analysis.dkim_verification.selector || "s1"})
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-white/5 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">Algorithm / Key Length:</span>
+                  <span className="text-cyan-300">
+                    {analysis.dkim_verification.algorithm} ({analysis.dkim_verification.key_length_bits}-bit RSA)
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-white/5 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">Body Hash (bh=) Integrity:</span>
+                  <span className={analysis.dkim_verification.body_hash_valid ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                    {analysis.dkim_verification.body_hash_valid ? "MATCHED (Relaxed SHA256)" : "MISMATCH (Tampered)"}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-white/5 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">Mathematical Signature:</span>
+                  <span className={analysis.dkim_verification.signature_math_valid ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                    {analysis.dkim_verification.signature_math_valid ? "VALID RSA SIGNATURE" : "INVALID / FORGED"}
+                  </span>
+                </div>
+              </div>
+
+              {analysis.dkim_verification.reason && (
+                <div className="text-[11px] font-mono text-slate-400 bg-black/40 p-2.5 rounded-lg border border-white/5">
+                  <span className="text-slate-500">Diagnostic Reason: </span>
+                  <span className={analysis.dkim_verification.verification_status === "PASS" ? "text-emerald-300" : "text-rose-300"}>
+                    {analysis.dkim_verification.reason}
+                  </span>
+                </div>
+              )}
+            </LiquidGlassCard>
+          )}
+
+          {/* Multi-Feed External CTI Threat Matrix (Phase 7 INT-03 / GEO-02-EXT) */}
           <div className="space-y-2">
-            <AttachmentTriageCard attachments={analysis.attachments} />
+            <CtiReputationMatrix
+              initialRecords={analysis.cti_reputation || []}
+              originIp={analysis.originating_node?.ip}
+              senderDomain={analysis.authentication?.spf?.domain}
+            />
           </div>
+
+          {/* Static Attachment Triage Stream (Phase 3 & Phase 5) */}
+          <div className="space-y-2">
+            <AttachmentTriageCard
+              attachments={analysis.attachments}
+              caseId={analysis.case_id}
+            />
+          </div>
+
 
           {/* Cartographic Relay Hop Map & Origin Geolocation */}
           <div className="space-y-2">
@@ -371,6 +498,62 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
                   </div>
                 </div>
 
+                {/* Deep Transformer 6-Vector Intent & VIP Impersonation (Phase 7 NLP-01-TRANS / NLP-03) */}
+                {analysis.transformer_nlp && (
+                  <div className="p-4 rounded-2xl bg-slate-950/80 border border-purple-500/30 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-bold text-purple-300 uppercase tracking-wider">
+                          DEEP TRANSFORMER NLP INTENT CLASSIFIER (NLP-01-TRANS)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <LiquidGlassBadge
+                          variant={(analysis.transformer_nlp.top_intent || (analysis.transformer_nlp as any).predicted_category) === "CLEAN_BENIGN" ? "safe" : "critical"}
+                          label={`${analysis.transformer_nlp.top_intent || (analysis.transformer_nlp as any).predicted_category || "INTENT"} (${((analysis.transformer_nlp.confidence || 0) * 100).toFixed(1)}%)`}
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* VIP Impersonation Alert Banner */}
+                    {(analysis.transformer_nlp.vip_impersonation || (analysis as any).vip_impersonation?.is_vip_impersonation) && (
+                      <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-mono flex items-center gap-2.5">
+                        <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
+                        <div>
+                          <span className="font-bold">EXECUTIVE DISPLAY NAME SPOOFING DETECTED:</span> Inbound message mimics protected executive{" "}
+                          <span className="text-white font-bold">{analysis.transformer_nlp.targeted_vip || (analysis as any).vip_impersonation?.matched_vip}</span> ({(analysis.transformer_nlp.targeted_title || (analysis as any).vip_impersonation?.vip_title || "Executive")}) from an unauthorized sending domain!
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 6-Vector Intent Probabilities */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">
+                        6-Vector Zero-Shot Intent Probability Distribution
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {Object.entries(analysis.transformer_nlp.intent_probabilities || (analysis.transformer_nlp as any).category_probabilities || {}).map(([intent, prob]: [string, any]) => (
+                          <div key={intent} className="p-2 rounded-lg bg-black/40 border border-white/5 space-y-1">
+                            <div className="flex justify-between text-[10px] font-mono">
+                              <span className="text-slate-400 truncate">{intent.replace(/_/g, " ")}</span>
+                              <span className="text-cyan-300 font-semibold">{(prob * 100).toFixed(0)}%</span>
+                            </div>
+                            <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  prob > 0.4 ? "bg-rose-500" : (prob > 0.15 ? "bg-amber-500" : "bg-cyan-500")
+                                }`}
+                                style={{ width: `${Math.min(prob * 100, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* MITRE ATT&CK Matrix & Threat Campaign Cluster */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                   <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/10 space-y-2">
@@ -451,6 +634,12 @@ export const ForensicOpsView: React.FC<{ initialText?: string }> = ({ initialTex
           />
         </div>
       )}
+
+      {/* VIP Executive Roster Modal Dialog */}
+      <VipRosterModal
+        isOpen={showVipModal}
+        onClose={() => setShowVipModal(false)}
+      />
     </div>
   );
 };
