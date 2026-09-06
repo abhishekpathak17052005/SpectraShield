@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 pydantic
-pymongo
 psycopg2-binary
 python-dotenv
 requests
@@ -21,3 +20,11 @@ qrcode
 pillow
 pytest
 python-multipart
+extract-msg
+bleach
+pyzbar
+opencv-python-headless
+bcrypt
+pyotp
+python-jose[cryptography]
+passlib

@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import os
+import logging
+from pathlib import Path
+from typing import Any, Dict
 
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
-from pymongo import ASCENDING, MongoClient
 
-from app.pg_collection import PostgresCollection
+from app.pg_collection import PostgresCollection, InMemoryCollection
 
 
+# Explicitly load root .env and backend/.env as well as current working directory
+_backend_env = Path(__file__).resolve().parent.parent / ".env"
+_root_env = Path(__file__).resolve().parent.parent.parent / ".env"
+if _root_env.is_file():
+	load_dotenv(dotenv_path=_root_env)
+if _backend_env.is_file():
+	load_dotenv(dotenv_path=_backend_env, override=True)
 load_dotenv()
+
+logger = logging.getLogger("spectrashield.database")
 
 
 def _postgres_url() -> str:
@@ -24,9 +35,9 @@ def _postgres_url() -> str:
 
 def _db_backend() -> str:
 	configured = (os.getenv("DB_BACKEND") or "").strip().lower()
-	if configured in {"postgres", "mongo"}:
-		return configured
-	return "postgres" if _postgres_url() else "mongo"
+	if configured in {"supabase", "postgres"}:
+		return "supabase"
+	return "supabase" if _postgres_url() else "in-memory"
 
 
 def _setup_postgres_schema(conn) -> None:
@@ -60,6 +71,46 @@ def _setup_postgres_schema(conn) -> None:
 		)
 		""",
 		"CREATE INDEX IF NOT EXISTS idx_vt_cache_fetched_at ON vt_url_cache(fetched_at)",
+		"""
+		CREATE TABLE IF NOT EXISTS forensic_cases (
+			id TEXT PRIMARY KEY,
+			case_number TEXT UNIQUE,
+			created_at TIMESTAMPTZ NULL,
+			updated_at TIMESTAMPTZ NULL,
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb
+		)
+		""",
+		"CREATE INDEX IF NOT EXISTS idx_cases_case_number ON forensic_cases(case_number)",
+		"CREATE INDEX IF NOT EXISTS idx_cases_created_at ON forensic_cases(created_at)",
+		"""
+		CREATE TABLE IF NOT EXISTS forensic_analyses (
+			id TEXT PRIMARY KEY,
+			case_id TEXT UNIQUE,
+			created_at TIMESTAMPTZ NULL,
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb
+		)
+		""",
+		"CREATE INDEX IF NOT EXISTS idx_analyses_case_id ON forensic_analyses(case_id)",
+		"""
+		CREATE TABLE IF NOT EXISTS forensic_audit_ledger (
+			id TEXT PRIMARY KEY,
+			case_id TEXT,
+			timestamp TIMESTAMPTZ NULL,
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb
+		)
+		""",
+		"CREATE INDEX IF NOT EXISTS idx_audit_case_id ON forensic_audit_ledger(case_id)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON forensic_audit_ledger(timestamp)",
+		"""
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			email TEXT UNIQUE,
+			created_at TIMESTAMPTZ NULL,
+			updated_at TIMESTAMPTZ NULL,
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb
+		)
+		""",
+		"CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
 	]
 
 	with conn.cursor() as cur:
@@ -67,13 +118,31 @@ def _setup_postgres_schema(conn) -> None:
 			cur.execute(stmt)
 
 
-backend = _db_backend()
+# Initialize Database Connection
+pg_url = _postgres_url()
+is_connected = False
+conn = None
 
-if backend == "postgres":
-	conn = psycopg2.connect(_postgres_url(), cursor_factory=RealDictCursor)
-	conn.autocommit = True
-	_setup_postgres_schema(conn)
+if pg_url:
+	try:
+		conn = psycopg2.connect(pg_url, cursor_factory=RealDictCursor)
+		conn.autocommit = True
+		_setup_postgres_schema(conn)
+		is_connected = True
+		backend = "supabase"
+		logger.info("Successfully connected to Supabase (PostgreSQL) and verified database schemas.")
+	except Exception as exc:
+		logger.warning(
+			f"Failed to connect to Supabase PostgreSQL ({exc}). Operating in resilient in-memory mode."
+		)
+		is_connected = False
+		backend = "in-memory"
+else:
+	backend = "in-memory"
+	logger.info("No DATABASE_URL or SUPABASE_DB_URL configured. Operating in resilient in-memory mode.")
 
+
+if is_connected and conn is not None:
 	scans_collection = PostgresCollection(
 		connection=conn,
 		table_name="scans",
@@ -95,34 +164,60 @@ if backend == "postgres":
 		key_field="url",
 		extra_columns=["fetched_at"],
 	)
-
-	# Backward-compatible alias used by older modules
-	scan_collection = scans_collection
+	forensic_cases_collection = PostgresCollection(
+		connection=conn,
+		table_name="forensic_cases",
+		key_column="id",
+		key_field="id",
+		extra_columns=["case_number", "created_at", "updated_at"],
+	)
+	forensic_analyses_collection = PostgresCollection(
+		connection=conn,
+		table_name="forensic_analyses",
+		key_column="id",
+		key_field="id",
+		extra_columns=["case_id", "created_at"],
+	)
+	audit_ledger_collection = PostgresCollection(
+		connection=conn,
+		table_name="forensic_audit_ledger",
+		key_column="id",
+		key_field="id",
+		extra_columns=["case_id", "timestamp"],
+	)
+	users_collection = PostgresCollection(
+		connection=conn,
+		table_name="users",
+		key_column="id",
+		key_field="id",
+		extra_columns=["email", "created_at", "updated_at"],
+	)
 else:
-	mongo_uri = (os.getenv("MONGO_URI") or "mongodb://localhost:27017/").strip()
-	mongo_db_name = (os.getenv("MONGO_DB_NAME") or "spectrashield_db").strip()
+	scans_collection = InMemoryCollection(name="scans", key_field="id")
+	threat_feed_collection = InMemoryCollection(name="threat_feed", key_field="url")
+	vt_cache_collection = InMemoryCollection(name="vt_url_cache", key_field="url")
+	forensic_cases_collection = InMemoryCollection(name="forensic_cases", key_field="id")
+	forensic_analyses_collection = InMemoryCollection(name="forensic_analyses", key_field="id")
+	audit_ledger_collection = InMemoryCollection(name="forensic_audit_ledger", key_field="id")
+	users_collection = InMemoryCollection(name="users", key_field="id")
 
-	client = MongoClient(mongo_uri)
-	db = client[mongo_db_name]
+# Backward-compatible alias used by older modules
+scan_collection = scans_collection
 
-	scans_collection = db["scans"]
 
-	def _drop_scan_ttl_indexes() -> None:
-		# Keep scan history for lifetime: remove any legacy TTL index if present.
-		for index_name, details in scans_collection.index_information().items():
-			if "expireAfterSeconds" in details:
-				scans_collection.drop_index(index_name)
-
-	_drop_scan_ttl_indexes()
-
-	scans_collection.create_index([("thread_id", ASCENDING)])
-	scans_collection.create_index([("linkedin_thread_id", ASCENDING)], unique=True, sparse=True)
-
-	# Backward-compatible alias used by older modules
-	scan_collection = scans_collection
-
-	threat_feed_collection = db["threat_feed"]
-	threat_feed_collection.create_index([("url", ASCENDING)], unique=True)
-
-	vt_cache_collection = db["vt_url_cache"]
-	vt_cache_collection.create_index([("url", ASCENDING)], unique=True)
+def get_db_status() -> Dict[str, Any]:
+	"""Returns real-time database connection diagnostics."""
+	return {
+		"backend": backend,
+		"is_connected": is_connected,
+		"provider": "Supabase (PostgreSQL)" if is_connected else "In-Memory Vault",
+		"tables": [
+			"scans",
+			"threat_feed",
+			"vt_url_cache",
+			"forensic_cases",
+			"forensic_analyses",
+			"forensic_audit_ledger",
+			"users",
+		],
+	}

@@ -51,7 +51,7 @@ def _set_nested(target: dict[str, Any], dotted_key: str, value: Any) -> None:
 
 class PostgresCollection:
     """
-    Small subset of PyMongo collection API used in this codebase.
+    High-performance PostgreSQL / Supabase JSONB collection driver.
     """
 
     def __init__(
@@ -275,3 +275,123 @@ class PostgresCollection:
 
         inserted_id = self._insert_payload(merged)
         return UpdateResult(matched_count=0, modified_count=0, upserted_id=inserted_id)
+
+
+class InMemoryCollection:
+    """
+    In-memory collection with method parity to PostgresCollection.
+    Provides reliable, zero-config local storage for automated tests and offline dev.
+    """
+
+    def __init__(self, name: str, key_field: str = "id"):
+        self.name = name
+        self.key_field = key_field
+        self._docs: list[dict[str, Any]] = []
+
+    def _matches_filter(self, doc: dict[str, Any], flt: dict[str, Any]) -> bool:
+        for key, expected in (flt or {}).items():
+            current = _get_nested(doc, key)
+
+            if isinstance(expected, dict):
+                in_values = expected.get("$in")
+                if in_values is not None:
+                    if current not in in_values:
+                        return False
+                    continue
+                return False
+
+            if current != expected:
+                return False
+
+        return True
+
+    def _apply_projection(self, doc: dict[str, Any], projection: dict[str, int] | None) -> dict[str, Any]:
+        if not projection or projection == {"_id": 0}:
+            return dict(doc)
+
+        include_fields = [k for k, v in projection.items() if k != "_id" and int(v) == 1]
+        if not include_fields:
+            return dict(doc)
+
+        projected: dict[str, Any] = {}
+        for field in include_fields:
+            value = _get_nested(doc, field)
+            if value is not None:
+                _set_nested(projected, field, value)
+        return projected
+
+    def find_one(self, flt: dict[str, Any], projection: dict[str, int] | None = None) -> dict[str, Any] | None:
+        for doc in self._docs:
+            if self._matches_filter(doc, flt):
+                return self._apply_projection(doc, projection)
+        return None
+
+    def find(self, flt: dict[str, Any] | None = None, projection: dict[str, int] | None = None) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for doc in self._docs:
+            if self._matches_filter(doc, flt or {}):
+                results.append(self._apply_projection(doc, projection))
+        return results
+
+    def insert_one(self, doc: dict[str, Any]) -> dict[str, str]:
+        clean_doc = dict(doc)
+        if self.key_field not in clean_doc or clean_doc[self.key_field] is None:
+            clean_doc[self.key_field] = str(uuid.uuid4())[:8]
+        key_val = str(clean_doc[self.key_field])
+        self._docs.append(clean_doc)
+        return {"inserted_id": key_val}
+
+    def count_documents(self, flt: dict[str, Any] | None = None) -> int:
+        return len(self.find(flt or {}))
+
+    def delete_many(self, flt: dict[str, Any] | None = None) -> DeleteResult:
+        if not flt:
+            count = len(self._docs)
+            self._docs.clear()
+            return DeleteResult(deleted_count=count)
+
+        remaining = []
+        deleted = 0
+        for doc in self._docs:
+            if self._matches_filter(doc, flt):
+                deleted += 1
+            else:
+                remaining.append(doc)
+        self._docs = remaining
+        return DeleteResult(deleted_count=deleted)
+
+    def delete_one(self, flt: dict[str, Any]) -> DeleteResult:
+        for i, doc in enumerate(self._docs):
+            if self._matches_filter(doc, flt):
+                self._docs.pop(i)
+                return DeleteResult(deleted_count=1)
+        return DeleteResult(deleted_count=0)
+
+    def update_one(self, flt: dict[str, Any], update: dict[str, Any], upsert: bool = False) -> UpdateResult:
+        set_map = dict(update.get("$set") or {})
+        set_on_insert = dict(update.get("$setOnInsert") or {})
+
+        for i, doc in enumerate(self._docs):
+            if self._matches_filter(doc, flt):
+                self._docs[i].update(set_map)
+                return UpdateResult(matched_count=1, modified_count=1)
+
+        if not upsert:
+            return UpdateResult(matched_count=0, modified_count=0)
+
+        merged = dict(set_on_insert)
+        merged.update(set_map)
+        for key, value in flt.items():
+            if isinstance(value, dict):
+                continue
+            merged.setdefault(key, value)
+
+        if self.key_field not in merged or merged[self.key_field] is None:
+            merged[self.key_field] = str(uuid.uuid4())[:8]
+        self._docs.append(merged)
+        return UpdateResult(matched_count=0, modified_count=0, upserted_id=str(merged[self.key_field]))
+
+    def create_index(self, *args, **kwargs) -> None:
+        """Compatibility no-op."""
+        pass
+

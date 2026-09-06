@@ -13,8 +13,8 @@ backend/
 │   ├── routes.py                   # History, metrics, and dashboard analytics endpoints
 │   ├── scanner.py                  # HybridConsensusScanner & URLIntelligenceEngine
 │   ├── schemas.py                  # Pydantic request/response schemas
-│   ├── database.py                 # Pluggable storage abstraction (PostgreSQL & MongoDB)
-│   ├── pg_collection.py            # PostgreSQL JSONB Mongo-compatible collection driver
+│   ├── database.py                 # Supabase (PostgreSQL) storage engine with in-memory fallback
+│   ├── pg_collection.py            # PostgreSQL JSONB collection driver & in-memory provider
 │   ├── storage.py                  # In-memory scan fallback storage
 │   ├── services/
 │   │   ├── ai_pattern_detector.py  # Synthetic lure & AI generation pattern detector
@@ -75,14 +75,14 @@ Fuses independent detection vectors into a unified score (0.0 to 100.0):
 
 ## Storage & Database Architecture
 
-SpectraShield features a pluggable database engine controlled by the `DB_BACKEND` environment variable in `app/database.py`:
+SpectraShield utilizes **Supabase (PostgreSQL)** as its dedicated persistent database engine:
 
-1. **PostgreSQL / Supabase (`DB_BACKEND=postgres`):**
-   - Utilizes `pg_collection.py` (`PostgresCollection`), implementing a MongoDB-compatible JSONB API directly on PostgreSQL.
-   - Manages three collections: `scans`, `threat_feed`, and `vt_url_cache`.
-   - Supports row-level security (RLS) and persistent lifetime telemetry for SOC dashboards.
-2. **MongoDB (`DB_BACKEND=mongo`):**
-   - Direct PyMongo driver connecting to a local or cloud MongoDB instance.
+1. **PostgreSQL / Supabase (`DB_BACKEND=supabase` or `postgres`):**
+   - Utilizes `pg_collection.py` (`PostgresCollection`), implementing a high-performance JSONB collection API directly on PostgreSQL.
+   - Automatically initializes and manages 7 tables: `scans`, `threat_feed`, `vt_url_cache`, `forensic_cases`, `forensic_analyses`, `forensic_audit_ledger`, and `users`.
+   - Supports ISO/IEC 27037 tamper-evident SHA-256 evidence vaults and persistent lifetime telemetry for SOC dashboards.
+2. **Resilient In-Memory Mode (Zero-Config Development):**
+   - When `DATABASE_URL` is omitted or offline, the platform automatically engages `InMemoryCollection` and in-memory evidence vaults, enabling local unit tests, CI pipelines, and air-gapped demos to run with zero dependencies.
 3. **Privacy Mode (`private_mode: true`):**
    - All heuristics execute strictly in-memory. No raw email text, sender identity, or scan records are written to persistent storage.
 
