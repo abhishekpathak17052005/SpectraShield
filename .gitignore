@@ -34,6 +34,9 @@ struct.md
 spec.md
 upgrade-struct.md
 *.pdf
+*.7z
+backend/data/quarantine/
+data/quarantine/
 upgraded-spec.md 
 phase3.md 
 tools.md 
