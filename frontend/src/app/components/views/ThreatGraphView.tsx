@@ -22,14 +22,37 @@ import {
   Sparkles,
   AlertTriangle,
   Info,
+  Network,
+  Layers,
+  Loader2,
 } from 'lucide-react';
 import { LiquidGlassCard } from '../liquid/LiquidGlassCard';
 import { LiquidGlassBadge } from '../liquid/LiquidGlassBadge';
 import { DefangedText } from '../common/DefangedText';
 import { LiquidMorphButton } from '../liquid/LiquidMorphButton';
+import { fetchCampaignCommunities } from '../../api';
+import { LouvainCommunitiesResponse, ThreatCommunityCluster } from '../../types';
 
 export const ThreatGraphView: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
+  const [showLouvain, setShowLouvain] = useState<boolean>(false);
+  const [louvainData, setLouvainData] = useState<LouvainCommunitiesResponse | null>(null);
+  const [loadingLouvain, setLoadingLouvain] = useState<boolean>(false);
+
+  const handleToggleLouvain = async () => {
+    if (!showLouvain && !louvainData) {
+      setLoadingLouvain(true);
+      try {
+        const data = await fetchCampaignCommunities();
+        setLouvainData(data);
+      } catch (err) {
+        console.error("Louvain communities error:", err);
+      } finally {
+        setLoadingLouvain(false);
+      }
+    }
+    setShowLouvain(!showLouvain);
+  };
 
   const initialNodes: Node[] = useMemo(
     () => [
@@ -255,11 +278,124 @@ export const ThreatGraphView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
-          <Info className="w-4 h-4 text-purple-400" />
-          <span>Click any entity to inspect correlation telemetry</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleToggleLouvain}
+            className={`px-3.5 py-1.5 rounded-xl font-mono text-xs font-semibold transition-all flex items-center gap-2 border ${
+              showLouvain
+                ? 'bg-purple-500/30 text-purple-200 border-purple-500/60 shadow-[0_0_15px_rgba(168,85,247,0.35)]'
+                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            {loadingLouvain ? (
+              <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+            ) : (
+              <Network className="w-4 h-4 text-purple-400" />
+            )}
+            <span>Louvain Modularity (Q ≥ 0.65)</span>
+            {louvainData && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300">
+                Q={louvainData.modularity.toFixed(3)}
+              </span>
+            )}
+          </button>
+
+          <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
+            <Info className="w-4 h-4 text-purple-400" />
+            <span>Click any entity to inspect correlation telemetry</span>
+          </div>
         </div>
       </div>
+
+      {/* Louvain Modularity Syndicate Detection Drawer/Panel */}
+      {showLouvain && louvainData && (
+        <LiquidGlassCard glowColor="purple" className="p-5 space-y-4 animate-fade-in border-purple-500/30">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                <Network className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold font-mono text-white">
+                    NETWORKX LOUVAIN COMMUNITY MODULARITY PARTITIONING
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                    GRP-02-LOUVAIN
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Partitions multi-case threat graphs into discrete attack syndicates using Louvain heuristic optimization.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 font-mono text-xs">
+              <div className="p-2 rounded-xl bg-slate-950/60 border border-white/10">
+                <span className="text-slate-400">Modularity Score: </span>
+                <span className="text-emerald-400 font-bold font-mono">
+                  Q = {louvainData.modularity.toFixed(3)}
+                </span>
+                <span className="text-slate-500 text-[10px] ml-1">(Threshold ≥ 0.65)</span>
+              </div>
+              <div className="p-2 rounded-xl bg-slate-950/60 border border-white/10">
+                <span className="text-slate-400">Identified Syndicates: </span>
+                <span className="text-purple-300 font-bold">
+                  {louvainData.syndicates_count}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {louvainData.communities.map((comm) => (
+              <div
+                key={comm.community_id}
+                className="p-4 rounded-2xl bg-slate-950/60 border border-white/10 hover:border-purple-500/40 transition-all space-y-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-purple-400" />
+                    <span className="text-xs font-bold font-mono text-white">
+                      {comm.syndicate_name}
+                    </span>
+                  </div>
+                  <LiquidGlassBadge
+                    variant="campaign"
+                    label={`${(comm.density * 100).toFixed(0)}% DENSITY`}
+                    size="sm"
+                  />
+                </div>
+
+                <div className="text-[11px] font-mono text-slate-400 space-y-1">
+                  <div>
+                    <span className="text-slate-500">Threat Actor: </span>
+                    <span className="text-purple-300 font-semibold">{comm.dominant_threat_actor}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Threat Category: </span>
+                    <span className="text-rose-300">{comm.dominant_category}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Associated Nodes ({comm.node_count}): </span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {comm.nodes.map((nodeId, idx) => (
+                        <span
+                          key={idx}
+                          className="px-1.5 py-0.5 rounded text-[10px] bg-white/5 text-slate-300 border border-white/10 font-mono"
+                        >
+                          {nodeId}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </LiquidGlassCard>
+      )}
 
       {/* Main Canvas + Correlation Drawer */}
       <div className="relative rounded-3xl border border-white/15 overflow-hidden bg-slate-950 shadow-2xl h-[620px] w-full">
