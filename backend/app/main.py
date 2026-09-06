@@ -1,5 +1,16 @@
 import asyncio
+from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+_backend_env = Path(__file__).resolve().parent.parent / ".env"
+_root_env = Path(__file__).resolve().parent.parent.parent / ".env"
+if _root_env.is_file():
+    load_dotenv(dotenv_path=_root_env)
+if _backend_env.is_file():
+    load_dotenv(dotenv_path=_backend_env, override=True)
+load_dotenv()
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -8,7 +19,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.database import scans_collection, threat_feed_collection, vt_cache_collection
 from app.routes import router
@@ -25,11 +36,30 @@ from app.services.threat_intel import sync_openphish
 logger = logging.getLogger("spectrashield.daily_pulse")
 hybrid_scanner = HybridConsensusScanner(threat_feed_collection, vt_cache_collection=vt_cache_collection)
 
+
+async def _daily_pulse_loop():
+    while True:
+        try:
+            result = await sync_openphish()
+            logger.info("OpenPhish sync complete: %s", result)
+        except Exception:
+            logger.exception("OpenPhish sync failed")
+        await asyncio.sleep(24 * 60 * 60)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_daily_pulse_loop())
+    yield
+    task.cancel()
+
+
 app = FastAPI(
     title="SpectraShield AI",
     description="Threat Intelligence Platform (phishing detection + explainable URL intel)",
     version="1.0.0",
-    debug=True
+    debug=True,
+    lifespan=lifespan
 )
 
 
@@ -43,8 +73,7 @@ app.add_middleware(
 
 
 class AnalyzeRequest(BaseModel):
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
     email_text: str = ""
     email_header: Optional[str] = None
@@ -949,22 +978,9 @@ def health_check():
     }
 
 from app.forensic_routes import forensic_router
+from app.auth_routes import auth_router
 
 app.include_router(router)
 app.include_router(forensic_router)
+app.include_router(auth_router)
 
-
-
-async def _daily_pulse_loop():
-    while True:
-        try:
-            result = await sync_openphish()
-            logger.info("OpenPhish sync complete: %s", result)
-        except Exception:
-            logger.exception("OpenPhish sync failed")
-        await asyncio.sleep(24 * 60 * 60)
-
-
-@app.on_event("startup")
-async def start_daily_pulse():
-    asyncio.create_task(_daily_pulse_loop())

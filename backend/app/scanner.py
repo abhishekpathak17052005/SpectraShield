@@ -178,10 +178,14 @@ class URLIntelligenceEngine:
         cached = self.vt_cache.find_one({"url": url}, {"_id": 0})
         if cached and cached.get("fetched_at"):
             cached_dt = cached["fetched_at"]
-            # Normalize to timezone-aware to avoid TypeError on comparison
-            if getattr(cached_dt, "tzinfo", None) is None:
+            if isinstance(cached_dt, str):
+                try:
+                    cached_dt = datetime.fromisoformat(cached_dt)
+                except Exception:
+                    cached_dt = None
+            elif getattr(cached_dt, "tzinfo", None) is None:
                 cached_dt = cached_dt.replace(tzinfo=timezone.utc)
-            if cached_dt > (now - timedelta(hours=24)):
+            if cached_dt and cached_dt > (now - timedelta(hours=24)):
                 return cached.get("result")
 
         # VT v3 URL ID is base64url(url) without '=' padding

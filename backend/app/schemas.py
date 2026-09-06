@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, List, Any
 
 
@@ -30,8 +30,7 @@ class EmailResponse(BaseModel):
 
 # SpectraShield 2.0 Forensic Schemas
 class ForensicAnalyzeRequest(BaseModel):
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
     raw_eml: Optional[str] = None
     email_text: Optional[str] = ""
@@ -79,6 +78,29 @@ class CampaignSchema(BaseModel):
     linked_incidents_count: int = 1
 
 
+class QuishingEvidence(BaseModel):
+    has_qr_code: bool = False
+    qr_count: int = 0
+    decoded_payloads: List[str] = []
+    defanged_payloads: List[str] = []
+    risk_level: str = "clean"  # "clean" | "suspicious" | "malicious"
+    source_image_filename: Optional[str] = None
+    extracted_urls: List[str] = []
+
+
+class QuarantinedAttachment(BaseModel):
+    filename: str
+    original_extension: str
+    file_size_bytes: int
+    sha256: str
+    md5: str
+    entropy_score: float
+    is_macro_enabled: bool = False
+    is_executable: bool = False
+    quarantine_path: str
+    is_quarantined: bool = True
+
+
 class AttachmentEvidence(BaseModel):
     filename: str
     content_type: str
@@ -93,6 +115,8 @@ class AttachmentEvidence(BaseModel):
     has_embedded_scripts: bool = False
     risk_level: str = "clean"
     risk_reasons: List[str] = []
+    quarantine_path: Optional[str] = None
+    is_quarantined: bool = False
 
 
 class UpdateCaseStatusRequest(BaseModel):
@@ -102,13 +126,73 @@ class UpdateCaseStatusRequest(BaseModel):
 
 
 class AddCaseNoteRequest(BaseModel):
-    text: str
+    text: Optional[str] = None
+    note: Optional[str] = None
     author: Optional[str] = "SOC Analyst"
 
 
 class AssignCaseRequest(BaseModel):
     analyst: str
     actor: Optional[str] = "Security Admin"
+
+
+class HomoglyphChar(BaseModel):
+    index: int
+    raw_char: str
+    lookalike_char: str
+    unicode_hex: str
+    script: str
+    char_name: Optional[str] = None
+
+
+class HomoglyphAnalysis(BaseModel):
+    has_homoglyphs: bool
+    is_punycode: bool = False
+    raw_domain: str = ""
+    punycode_ascii: Optional[str] = None
+    normalized_ascii: str = ""
+    target_brand: Optional[str] = None
+    target_domain: Optional[str] = None
+    substituted_characters: List[HomoglyphChar] = []
+    risk_score_modifier: float = 0.0
+    verdict: str = "Clean"
+
+
+class CtiReputationRecord(BaseModel):
+    indicator: str
+    source: str  # "Google Safe Browsing" | "URLhaus" | "AbuseIPDB" | "Commercial VPN"
+    is_malicious: bool
+    threat_category: Optional[str] = None
+    confidence_score: float = 0.0
+    details: Dict[str, Any] = {}
+
+
+class DkimVerificationDetails(BaseModel):
+    selector: str = ""
+    signing_domain: str = ""
+    key_length_bits: int = 0
+    algorithm: str = "rsa-sha256"
+    body_hash_valid: bool = False
+    signature_math_valid: bool = False
+    dns_key_published: bool = False
+    raw_public_key: Optional[str] = None
+    verification_status: str = "NONE"  # "PASS" | "FAIL" | "NONE"
+    reason: Optional[str] = None
+
+
+class TransformerNlpResult(BaseModel):
+    predicted_category: str
+    confidence: float
+    category_probabilities: Dict[str, float]
+    model_name: str = "DeBERTa-v3-small-Quantized"
+    inference_latency_ms: float = 0.0
+
+
+class VipRosterEntry(BaseModel):
+    name: str
+    title: str
+    trusted_domains: List[str] = []
+    is_active: bool = True
 
 
 class ForensicAnalyzeResponse(BaseModel):
@@ -131,4 +215,17 @@ class ForensicAnalyzeResponse(BaseModel):
     mitre_tactics: List[str]
     attack_simulation: Optional[List[SimulationStep]] = None
     anomalies: List[str]
+    homoglyph_analysis: Optional[HomoglyphAnalysis] = None
+    quishing_evidence: Optional[QuishingEvidence] = None
+    ingestion_format: Optional[str] = "STANDARD_RFC5322_EML"
+    sanitized_html: Optional[str] = None
+    script_cues: Optional[List[str]] = None
+    cti_reputation: Optional[List[Dict[str, Any]]] = None
+    dkim_crypto_verification: Optional[Dict[str, Any]] = None
+    dkim_verification: Optional[Dict[str, Any]] = None
+    transformer_nlp: Optional[Dict[str, Any]] = None
+    vip_impersonation: Optional[Dict[str, Any]] = None
     created_at: str
+
+
+

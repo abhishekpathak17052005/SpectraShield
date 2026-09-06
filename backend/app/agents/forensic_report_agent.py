@@ -97,6 +97,126 @@ class ForensicReportAgent:
             "objects": objects
         }
 
+    def generate_ioc_csv(self, case_id: str, forensic_data: Dict[str, Any], defang: bool = True) -> str:
+        """
+        Generates an RFC 4180 compliant CSV of all indicators of compromise (IOCs)
+        discovered in the forensic examination.
+        """
+        import csv
+
+        def _defang_ip(ip: str) -> str:
+            if not ip or not defang:
+                return ip
+            return ip.replace(".", "[.]")
+
+        def _defang_domain(domain: str) -> str:
+            if not domain or not defang:
+                return domain
+            return domain.replace(".", "[.]")
+
+        output = io.StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow([
+            "ioc_type",
+            "defanged_value",
+            "raw_value",
+            "threat_category",
+            "confidence_score",
+            "context_source",
+            "first_seen"
+        ])
+
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        final_risk = float(forensic_data.get("final_risk", 75.0))
+        category = str(forensic_data.get("threat_category", "Phishing"))
+
+        # 1. Originating Node IP
+        origin = forensic_data.get("originating_node") or {}
+        origin_ip = origin.get("ip")
+        if origin_ip and not origin.get("is_private"):
+            cat = "Tor Exit Node" if origin.get("is_anonymized") else category
+            writer.writerow([
+                "origin_ip",
+                _defang_ip(origin_ip),
+                origin_ip,
+                cat,
+                round(final_risk, 1),
+                f"ERPN Originating Hop (ISP: {origin.get('isp', 'Unknown')}, ASN: {origin.get('asn', 'Unknown')})",
+                now_iso
+            ])
+
+        # 2. Intermediate Public Relay Hops
+        for hop in forensic_data.get("relay_path", []):
+            hip = hop.get("ip")
+            if hip and not hop.get("is_private") and hip != origin_ip:
+                writer.writerow([
+                    "relay_hop_ip",
+                    _defang_ip(hip),
+                    hip,
+                    "Intermediate Relay MTA",
+                    round(max(final_risk - 20.0, 10.0), 1),
+                    f"Hop #{hop.get('hop', 0)} ({hop.get('received_from', '')})",
+                    hop.get("timestamp") or now_iso
+                ])
+
+        # 3. Sender Domain / Return-Path Domain
+        auth = forensic_data.get("authentication") or {}
+        spf_domain = (auth.get("spf") or {}).get("domain")
+        dmarc_domain = (auth.get("dmarc") or {}).get("domain")
+        target_domain = spf_domain or dmarc_domain
+        if target_domain:
+            writer.writerow([
+                "sender_domain",
+                _defang_domain(target_domain),
+                target_domain,
+                "Email Spoofing / Lookalike Domain",
+                round(final_risk, 1),
+                "Authentication-Results / From Header",
+                now_iso
+            ])
+
+        # 4. Attachments (SHA-256 and MD5)
+        for att in forensic_data.get("attachments", []):
+            att_sha256 = att.get("sha256")
+            att_fn = att.get("filename", "unnamed")
+            att_risk = att.get("risk_level", "clean")
+            if att_sha256:
+                writer.writerow([
+                    "attachment_hash_sha256",
+                    att_sha256,
+                    att_sha256,
+                    f"Malicious Attachment ({att_risk})",
+                    85.0 if att_risk == "malicious" else 50.0,
+                    f"Attachment: {att_fn} (Entropy: {att.get('entropy_score', 0)})",
+                    now_iso
+                ])
+            att_md5 = att.get("md5")
+            if att_md5:
+                writer.writerow([
+                    "attachment_hash_md5",
+                    att_md5,
+                    att_md5,
+                    f"Malicious Attachment ({att_risk})",
+                    85.0 if att_risk == "malicious" else 50.0,
+                    f"Attachment: {att_fn}",
+                    now_iso
+                ])
+
+        # 5. Raw Evidence Checksum
+        evidence_hash = forensic_data.get("sha256_evidence_hash")
+        if evidence_hash:
+            writer.writerow([
+                "evidence_hash_sha256",
+                evidence_hash,
+                evidence_hash,
+                "Case Cryptographic Pre-Hash (ISO 27037)",
+                100.0,
+                f"Evidence Vault Case {case_id}",
+                now_iso
+            ])
+
+        return output.getvalue()
+
     def generate_pdf_dossier_bytes(self, case_id: str, forensic_data: Dict[str, Any], redact_pii: bool = False) -> bytes:
         """Generates a court-admissible forensic PDF dossier conforming to ISO/IEC 27037 standards."""
         if redact_pii:

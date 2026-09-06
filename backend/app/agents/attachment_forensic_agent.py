@@ -2,6 +2,7 @@ import re
 import math
 import hashlib
 import io
+import os
 import zipfile
 from email import message_from_string, message_from_bytes
 from typing import List, Dict, Any, Optional
@@ -75,7 +76,35 @@ class AttachmentForensicAgent:
         (b"/OpenAction", "PDF auto-executes actions immediately upon opening"),
     ]
 
-    def analyze_attachments_from_mime(self, raw_eml: str) -> List[Dict[str, Any]]:
+    def quarantine_attachment(self, data: bytes, case_id: str, sha256: str) -> str:
+        """
+        Isolates attachment bytes in a non-executable disk quarantine vault:
+        backend/data/quarantine/{case_id}/{sha256}.quarantine
+        """
+        try:
+            import stat
+            base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "quarantine", case_id)
+            os.makedirs(base_dir, exist_ok=True)
+            quarantine_file = os.path.join(base_dir, f"{sha256}.quarantine")
+
+            if os.path.exists(quarantine_file):
+                return f"data/quarantine/{case_id}/{sha256}.quarantine"
+
+            with open(quarantine_file, "wb") as f:
+                f.write(data)
+
+            # Restrict permissions to read-only
+            try:
+                os.chmod(quarantine_file, stat.S_IREAD)
+            except Exception:
+                pass
+
+            return f"data/quarantine/{case_id}/{sha256}.quarantine"
+        except Exception as e:
+            return f"quarantine_err: {e}"
+
+
+    def analyze_attachments_from_mime(self, raw_eml: str, case_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Extracts and statically inspects attachments from an RFC 5322 MIME string."""
         if not raw_eml:
             return []
@@ -102,12 +131,12 @@ class AttachmentForensicAgent:
                 filename = f"unnamed_attachment_{len(attachments) + 1}.bin"
 
             content_type = part.get_content_type() or "application/octet-stream"
-            evidence = self.inspect_attachment_bytes(filename, content_type, payload)
+            evidence = self.inspect_attachment_bytes(filename, content_type, payload, case_id=case_id)
             attachments.append(evidence)
 
         return attachments
 
-    def inspect_attachment_bytes(self, filename: str, content_type: str, data: bytes) -> Dict[str, Any]:
+    def inspect_attachment_bytes(self, filename: str, content_type: str, data: bytes, case_id: Optional[str] = None) -> Dict[str, Any]:
         """Performs static forensic inspection on an extracted attachment byte stream."""
         file_size = len(data)
         sha256 = hashlib.sha256(data).hexdigest()
@@ -167,6 +196,13 @@ class AttachmentForensicAgent:
         else:
             risk_level = "clean"
 
+        # 6. Disk Quarantine Isolation
+        quarantine_path = None
+        is_quarantined = False
+        if case_id:
+            quarantine_path = self.quarantine_attachment(data, case_id, sha256)
+            is_quarantined = True
+
         return {
             "filename": filename,
             "content_type": content_type,
@@ -181,7 +217,11 @@ class AttachmentForensicAgent:
             "has_embedded_scripts": has_embedded_scripts,
             "risk_level": risk_level,
             "risk_reasons": risk_reasons,
+            "quarantine_path": quarantine_path,
+            "is_quarantined": is_quarantined,
+            "raw_bytes": data,
         }
 
 
 attachment_forensic_agent = AttachmentForensicAgent()
+

@@ -2,6 +2,7 @@ import re
 import unicodedata
 from typing import Dict, List, Any, Tuple
 from app.services.manipulation_detector import calculate_manipulation_score
+from app.services.transformer_classifier import transformer_classifier
 
 # Common Homoglyphs (Cyrillic/Greek confusables frequently substituted for ASCII)
 _HOMOGLYPH_MAP = {
@@ -71,7 +72,13 @@ class NLPThreatAgent:
         executive_hits = self._scan_patterns(clean_text, _BEC_EXECUTIVE_PATTERNS)
         credential_hits = self._scan_patterns(clean_text, _CREDENTIAL_PATTERNS)
 
-        # 4. Synthesize Threat Category & BEC Score
+        # 4. Deep Transformer Zero-Shot Intent Classification
+        transformer_res = transformer_classifier.classify_intent(clean_text, subject=subject)
+
+        # 5. Executive Display Name VIP Roster Check
+        vip_res = transformer_classifier.check_vip_impersonation(sender_email, body_text=clean_text)
+
+        # 6. Synthesize Threat Category & BEC Score
         bec_score, threat_category = self._classify_bec(
             financial_hits=financial_hits,
             executive_hits=executive_hits,
@@ -81,24 +88,32 @@ class NLPThreatAgent:
         )
 
         all_detected_cues = list(set(financial_hits + executive_hits + credential_hits + flagged_phrases))
+        if vip_res.get("is_vip_impersonation"):
+            all_detected_cues.append(vip_res["warning"])
+            bec_score = max(bec_score, 0.90)
+            threat_category = "Executive / VIP Impersonation (Spoofed Display Name)"
 
         # Overall NLP risk (0 - 100)
         nlp_risk = max(manipulation_score, bec_score * 100.0)
         if homoglyphs_detected or zero_width_count > 0:
             nlp_risk = min(100.0, nlp_risk + 25.0)
+        if vip_res.get("is_vip_impersonation"):
+            nlp_risk = max(nlp_risk, 92.0)
 
         return {
             "nlp_risk": round(nlp_risk, 2),
             "bec_score": round(bec_score, 3),
             "threat_category": threat_category,
             "financial_intent": len(financial_hits) > 0,
-            "executive_impersonation": len(executive_hits) > 0,
+            "executive_impersonation": len(executive_hits) > 0 or vip_res.get("is_vip_impersonation", False),
             "credential_harvesting": len(credential_hits) > 0,
             "detected_cues": all_detected_cues,
             "psychological_pressure": psych_index,
             "homoglyphs_detected": homoglyphs_detected,
             "zero_width_spaces_detected": zero_width_count,
-            "highlighted_phrases": all_detected_cues[:12]
+            "highlighted_phrases": all_detected_cues[:12],
+            "transformer_nlp": transformer_res,
+            "vip_impersonation": vip_res
         }
 
     def _detect_homoglyphs(self, text: str) -> Tuple[List[Dict[str, str]], str]:
@@ -176,5 +191,20 @@ class NLPThreatAgent:
             "psychological_pressure": {"urgency": 0, "fear": 0, "authority": 0, "scarcity": 0},
             "homoglyphs_detected": [],
             "zero_width_spaces_detected": 0,
-            "highlighted_phrases": []
+            "highlighted_phrases": [],
+            "transformer_nlp": {
+                "predicted_category": "CLEAN_BENIGN",
+                "confidence": 1.0,
+                "category_probabilities": {
+                    "CLEAN_BENIGN": 1.0,
+                    "CREDENTIAL_HARVESTING": 0.0,
+                    "FINANCIAL_WIRE_FRAUD": 0.0,
+                    "INVOICE_SUPPLIER_FRAUD": 0.0,
+                    "EXECUTIVE_IMPERSONATION": 0.0,
+                    "EXTORTION_BLACKMAIL": 0.0
+                },
+                "model_name": "DeBERTa-v3-small-Quantized",
+                "inference_latency_ms": 0.1
+            },
+            "vip_impersonation": {"is_vip_impersonation": False, "matched_vip": None}
         }
