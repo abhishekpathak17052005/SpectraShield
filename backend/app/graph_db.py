@@ -194,7 +194,12 @@ class ThreatGraphManager:
         if not target_nodes:
             return {
                 "nodes": [
-                    {"id": "camp:CAMP-DEFAULT", "type": "campaign", "data": {"label": "No Active Campaign Cluster", "type": "campaign"}},
+                    {
+                        "id": "camp:CAMP-DEFAULT",
+                        "type": "campaign",
+                        "position": {"x": 250, "y": 200},
+                        "data": {"label": "No Active Campaign Cluster", "type": "campaign", "kind": "threat-actor"}
+                    },
                 ],
                 "edges": []
             }

@@ -377,50 +377,46 @@
     var btn = document.createElement('button');
     btn.className = 'spectrashield-escalate-btn';
     btn.style.marginLeft = '8px';
-    btn.style.padding = '2px 10px';
+    btn.style.padding = '3px 12px';
     btn.style.borderRadius = '999px';
     btn.style.fontSize = '11px';
     btn.style.fontWeight = 'bold';
     btn.style.fontFamily = 'monospace';
-    btn.style.background = '#DC2626';
+    btn.style.background = 'linear-gradient(135deg, #0ea5e9, #0284c7)';
     btn.style.color = '#FFFFFF';
-    btn.style.border = '1px solid #EF4444';
+    btn.style.border = '1px solid #38bdf8';
     btn.style.cursor = 'pointer';
-    btn.style.boxShadow = '0 2px 8px rgba(220, 38, 38, 0.3)';
-    btn.textContent = '🚨 Escalate to Forensic SOC';
-    btn.title = 'Dispatch headers & IOCs to SpectraShield 2.0 Evidence Vault';
+    btn.style.boxShadow = '0 2px 10px rgba(14, 165, 233, 0.4)';
+    btn.textContent = '⚡ Scan in Mail Intelligence';
+    btn.title = 'Extract full email DOM and open in SpectraShield Mail Intelligence';
 
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      btn.textContent = '⏳ Sealing Evidence...';
+      btn.textContent = '⏳ Scanning DOM & Sealing...';
       btn.disabled = true;
 
-      var context = (openMailCache[threadId] && openMailCache[threadId].context) || {};
-      var rawPayload = "Subject: " + (context.subject || (subjectEl && subjectEl.textContent) || '') + "\n" +
-        "From: " + (context.sender_email || 'unknown@domain.com') + "\n" +
-        (context.email_header || '') + "\n\n" +
-        (context.opened_mail_body || context.email_text || '');
+      var data = gatherOpenMailData(null);
+      var payload = (data && data.structuredPayload) ? data.structuredPayload : {
+        platform: 'gmail',
+        subject: (subjectEl && subjectEl.textContent) || 'Gmail Incident',
+        sender: { email: 'unknown@domain.com', name: 'Sender' },
+        body: ''
+      };
 
-      fetch(API_BASE + '/api/forensics/analyze-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raw_eml: rawPayload,
-          subject: context.subject || (subjectEl && subjectEl.textContent),
-          sender_email: context.sender_email
-        })
-      })
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        btn.textContent = '✓ Sealed: ' + (data.case_number || 'CASE-2026');
-        btn.style.background = '#059669';
-        btn.style.borderColor = '#10B981';
-        window.open('http://localhost:5173/?view=forensics&case_id=' + encodeURIComponent(data.case_id || ''), '_blank');
-      })
-      .catch(function () {
-        btn.textContent = '⚠️ Escalation Failed';
-        btn.disabled = false;
+      chrome.runtime.sendMessage({
+        type: 'SPECTRASHIELD_ANALYZE_EMAIL',
+        payload: payload,
+        openDashboard: true
+      }, function (res) {
+        if (res && res.ok && res.case_id) {
+          btn.textContent = '✓ Opened: ' + (res.data?.case_number || 'CASE-2026');
+          btn.style.background = '#059669';
+          btn.style.borderColor = '#10B981';
+        } else {
+          btn.textContent = '⚠️ Scan Failed';
+          btn.disabled = false;
+        }
       });
     });
 
@@ -445,36 +441,181 @@
     };
   }
 
+  function unwrapGoogleUrl(url) {
+    if (!url) return '';
+    try {
+      if (url.indexOf('google.com/url?') !== -1 || url.indexOf('google.com/url%3F') !== -1) {
+        var parsed = new URL(url);
+        var q = parsed.searchParams.get('q');
+        if (q) return q;
+      }
+    } catch (_) {}
+    return url;
+  }
+
   function gatherOpenMailData(openBody) {
-    if (!openBody) return null;
+    // 1. Locate the active message body container in the Gmail DOM
+    var bodyElements = document.querySelectorAll('.a3s, .BodyFragment, div[role="main"] .a3s, .ii.gt div.a3s');
+    var bodyContainer = openBody || null;
+    if (!bodyContainer) {
+      for (var b = bodyElements.length - 1; b >= 0; b--) {
+        var candidate = bodyElements[b];
+        if (candidate.offsetParent !== null || candidate.clientHeight > 0 || (candidate.innerText && candidate.innerText.trim().length > 10)) {
+          bodyContainer = candidate;
+          break;
+        }
+      }
+      if (!bodyContainer && bodyElements.length > 0) {
+        bodyContainer = bodyElements[bodyElements.length - 1];
+      }
+    }
+    if (!bodyContainer) {
+      bodyContainer = document.querySelector('div[role="main"] .a3s') || document.querySelector('div[role="main"]');
+    }
 
-    var subjectEl = document.querySelector('h2.hP');
-    var subject = subjectEl && subjectEl.textContent ? subjectEl.textContent.trim() : '';
+    // 2. Subject extraction with multiple robust fallbacks
+    var subjectEl = document.querySelector('h2.hP, div[role="main"] h2.hP, [data-thread-perm-id] h2, div[role="main"] h2, h2[data-legacy-thread-id]');
+    var subject = subjectEl && subjectEl.innerText ? subjectEl.innerText.trim() : (subjectEl ? subjectEl.textContent.trim() : '');
 
-    var senderEl = document.querySelector('.gD[email], span[email], .go');
-    var sender = senderEl ? (senderEl.getAttribute('email') || senderEl.textContent || '').trim() : '';
+    // Check document.title if subject is missing or too short
+    if (!subject || subject.length < 2) {
+      var title = document.title || '';
+      var titleClean = title.replace(/\s*-\s*[^@\s]+@[^@\s]+\s*-\s*Gmail$/i, '')
+                            .replace(/\s*-\s*Gmail$/i, '')
+                            .replace(/^\(\d+\)\s*/, '')
+                            .trim();
+      if (titleClean && titleClean.toLowerCase() !== 'gmail' && titleClean.toLowerCase() !== 'inbox') {
+        subject = titleClean;
+      }
+    }
+    // Also check active thread row if in preview mode
+    if (!subject || subject.length < 2) {
+      var activeRowSubject = document.querySelector('tr.zA[aria-selected="true"] span.bog, tr.zA.aqw span.bog, tr.zA span.bog');
+      if (activeRowSubject && activeRowSubject.textContent) {
+        subject = activeRowSubject.textContent.trim();
+      }
+    }
+    if (!subject) {
+      subject = 'Gmail Incident Triage';
+    }
 
-    var bodyText = (openBody.innerText || '').trim();
-    var links = openBody.querySelectorAll('a[href]');
-    var urls = [];
-    for (var i = 0; i < links.length; i++) {
-      var href = links[i].getAttribute('href');
-      if (!href || !/^https?:\/\//i.test(href)) continue;
-      var clean = sanitizeInlineUrl(href);
-      if (clean && urls.indexOf(clean) === -1) urls.push(clean);
+    // 3. Sender extraction (Name and Email)
+    var senderEmail = '';
+    var senderName = '';
+    var senderEl = document.querySelector('.gE .gD, .gD[email], span[email], .go, span.gD, .adn.ads [email]');
+    if (senderEl) {
+      senderEmail = senderEl.getAttribute('email') || '';
+      senderName = senderEl.getAttribute('name') || senderEl.textContent || '';
+    }
+    var headerBlock = document.querySelector('.gE, .ha, .ajy, div[role="main"] .adn');
+    if (headerBlock) {
+      var headerText = headerBlock.innerText || headerBlock.textContent || '';
+      if (!senderEmail) {
+        var emailMatch = headerText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+        if (emailMatch) senderEmail = emailMatch[1];
+      }
+      var nameEl = headerBlock.querySelector('.gD, span.qu');
+      if (nameEl && (!senderName || senderName === senderEmail)) {
+        senderName = nameEl.textContent.trim();
+      }
+    }
+    if (senderName && senderName.includes('<')) {
+      var parts = senderName.split('<');
+      senderName = parts[0].trim().replace(/^["']|["']$/g, '');
+      if (!senderEmail && parts[1]) {
+        senderEmail = parts[1].replace(/[>]/g, '').trim();
+      }
+    }
+    if (!senderEmail) {
+      senderEmail = 'unknown@domain.com';
+    }
+    if (!senderName) {
+      senderName = senderEmail.split('@')[0] || 'Sender';
+    }
+
+    // 4. Recipient extraction
+    var recipientEl = document.querySelector('.g2 span[email], span[email].hb, [data-hovercard-id], .adn.ads [email]');
+    var recipient = recipientEl ? (recipientEl.getAttribute('email') || recipientEl.textContent || '').trim() : '';
+    if (!recipient) {
+      var titleEmail = (document.title || '').match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (titleEmail && titleEmail[1] !== senderEmail) {
+        recipient = titleEmail[1];
+      } else {
+        recipient = 'analyst@corp.internal';
+      }
+    }
+
+    // 5. Timestamp extraction
+    var timeEl = document.querySelector('span.g3, td.gH span, [data-timestamp], time');
+    var timestamp = timeEl ? (timeEl.getAttribute('title') || timeEl.textContent || '').trim() : new Date().toISOString();
+
+    // 6. Body extraction (extract clean text)
+    var bodyText = bodyContainer ? (bodyContainer.innerText || bodyContainer.textContent || '').trim() : '';
+
+    // 7. URL extraction with Google redirect unwrapping
+    var structuredUrls = [];
+    var rawUrls = [];
+    if (bodyContainer) {
+      var links = bodyContainer.querySelectorAll('a[href]');
+      for (var i = 0; i < links.length; i++) {
+        var rawHref = links[i].getAttribute('href');
+        if (!rawHref) continue;
+        var href = unwrapGoogleUrl(rawHref);
+        if (!href || !/^https?:\/\//i.test(href)) continue;
+        var clean = sanitizeInlineUrl(href);
+        if (clean && rawUrls.indexOf(clean) === -1) {
+          rawUrls.push(clean);
+          structuredUrls.push({
+            display_text: (links[i].textContent || '').trim() || clean,
+            href: clean
+          });
+        }
+      }
     }
 
     var textUrls = extractUrlsFromText(bodyText);
     for (var j = 0; j < textUrls.length; j++) {
-      if (urls.indexOf(textUrls[j]) === -1) urls.push(textUrls[j]);
+      var unwrapped = unwrapGoogleUrl(textUrls[j]);
+      if (rawUrls.indexOf(unwrapped) === -1) {
+        rawUrls.push(unwrapped);
+        structuredUrls.push({
+          display_text: unwrapped,
+          href: unwrapped
+        });
+      }
     }
+
+    var threadId = bodyContainer ? getCurrentOpenThreadId(bodyContainer) : null;
+
+    var structuredPayload = {
+      platform: 'gmail',
+      subject: subject,
+      sender: {
+        name: senderName,
+        email: senderEmail
+      },
+      recipient: recipient,
+      body: bodyText,
+      urls: structuredUrls,
+      timestamp: timestamp,
+      metadata: {
+        thread_id: threadId,
+        source_url: window.location.href,
+        extracted_at: new Date().toISOString()
+      }
+    };
 
     return {
       subjectEl: subjectEl,
       subject: subject,
-      sender: sender,
+      sender: senderEmail,
+      senderName: senderName,
+      recipient: recipient,
       bodyText: bodyText,
-      urls: urls
+      urls: rawUrls,
+      structuredUrls: structuredUrls,
+      structuredPayload: structuredPayload,
+      threadId: threadId
     };
   }
 
@@ -723,15 +864,64 @@
   }
 
   function openSpectraShieldAnalysis(entry) {
-    if (!entry) return;
-    var params = new URLSearchParams();
-    if (entry.emailText) params.set('email_text', entry.emailText);
-    if (entry.senderEmail) params.set('sender_email', entry.senderEmail);
-    if (entry.urls && entry.urls.length > 0) params.set('url', entry.urls[0]);
-    var url = 'http://localhost:5173/#spectra?' + params.toString();
-    try {
-      window.open(url, '_blank');
-    } catch (_) { }
+    // 1. First attempt: gather complete DOM from active open email
+    var data = gatherOpenMailData(null);
+    var payload;
+
+    if (data && (data.bodyText || data.urls.length > 0 || (data.subject && data.subject !== 'Gmail Incident Triage'))) {
+      payload = data.structuredPayload;
+    } else if (entry) {
+      // Fallback from inbox row cache
+      var sub = entry.subject || (entry.context && entry.context.subject) || 'Gmail Security Incident';
+      var body = entry.emailText || (entry.context && entry.context.emailText) || '';
+      var sender = entry.senderEmail || (entry.context && entry.context.senderEmail) || 'unknown@domain.com';
+      var rawUrls = entry.urls || (entry.context && entry.context.urls) || [];
+      var structuredUrls = rawUrls.map(function (u) {
+        return { display_text: u, href: u };
+      });
+
+      payload = {
+        platform: 'gmail',
+        subject: sub,
+        sender: {
+          name: sender.split('@')[0] || 'Sender',
+          email: sender
+        },
+        recipient: 'analyst@corp.internal',
+        body: body,
+        urls: structuredUrls,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          source: 'inbox_badge_click'
+        }
+      };
+    } else {
+      payload = {
+        platform: 'gmail',
+        subject: 'Gmail Security Triage',
+        sender: { name: 'Sender', email: 'unknown@domain.com' },
+        recipient: 'analyst@corp.internal',
+        body: '',
+        urls: [],
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    // 2. Dispatch to background to seal case and open directly in Mail Intelligence
+    chrome.runtime.sendMessage({
+      type: 'SPECTRASHIELD_ANALYZE_EMAIL',
+      payload: payload,
+      openDashboard: true
+    }, function (res) {
+      if (chrome.runtime.lastError) {
+        // Fallback only when background extension worker is unreachable:
+        var pendingUrl = 'http://localhost:5173/mail-intelligence?analyzing=true' +
+          '&subject=' + encodeURIComponent(payload.subject || '') +
+          '&sender_email=' + encodeURIComponent((payload.sender && payload.sender.email) || '') +
+          '&raw=' + encodeURIComponent((payload.body || payload.subject || '').slice(0, 500));
+        window.open(pendingUrl, '_blank');
+      }
+    });
   }
 
   function getBadgeIcon(level) {
@@ -1519,25 +1709,38 @@
     setTimeout(function () { clearInterval(t); }, 20000);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () {
-      var host = window.location.hostname || '';
-      if (host.indexOf('mail.google.com') !== -1) {
-        waitForGmail();
-        return;
-      }
-      if (host.indexOf('linkedin.com') !== -1 && window.location.href.indexOf('/messaging') !== -1) {
-        pingLinkedInBridge();
-        startLinkedInObserver();
-      }
-    });
-  } else {
+  function initContentScript() {
     var host = window.location.hostname || '';
     if (host.indexOf('mail.google.com') !== -1) {
       waitForGmail();
-    } else if (host.indexOf('linkedin.com') !== -1 && window.location.href.indexOf('/messaging') !== -1) {
+      return;
+    }
+    if (host.indexOf('linkedin.com') !== -1 && window.location.href.indexOf('/messaging') !== -1) {
       pingLinkedInBridge();
       startLinkedInObserver();
     }
   }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initContentScript);
+  } else {
+    initContentScript();
+  }
+
+  // ─── Active Tab Email Extraction Request from Popup & Background ──────────
+  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (msg && msg.type === 'EXTRACT_ACTIVE_EMAIL') {
+      try {
+        var mailData = gatherOpenMailData(null);
+        if (!mailData || (!mailData.subject && !mailData.bodyText)) {
+          sendResponse({ ok: false, error: 'Unable to read the current email. Ensure an email is open.' });
+          return;
+        }
+        sendResponse({ ok: true, payload: mailData.structuredPayload });
+      } catch (err) {
+        sendResponse({ ok: false, error: 'Extraction error: ' + (err ? err.message : 'Unknown') });
+      }
+      return true;
+    }
+  });
 })();

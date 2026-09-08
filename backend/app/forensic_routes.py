@@ -30,8 +30,9 @@ from app.services.qr_detector import qr_detector
 from app.services.cti_service import cti_service
 from app.services.dkim_verifier import dkim_verifier
 from app.services.transformer_classifier import transformer_classifier
+from app.services.url_analyzer import analyze_url
 from app.graph_db import threat_graph_manager
-from app.storage import evidence_vault
+from app.storage import evidence_vault, cases_vault, analyses_vault
 
 try:
     import extract_msg
@@ -68,10 +69,37 @@ async def _execute_forensic_pipeline(
     raw_upload_bytes: Optional[bytes] = None,
     explicit_html_body: Optional[str] = None
 ) -> Dict[str, Any]:
+    # 0. Extract structured fields if provided
+    sender_name = ""
+    sender_email = payload.sender_email or ""
+    if isinstance(payload.sender, dict):
+        sender_name = str(payload.sender.get("name") or "").strip()
+        sender_email = str(payload.sender.get("email") or sender_email).strip()
+    elif isinstance(payload.sender, str) and payload.sender:
+        raw_s = payload.sender.strip()
+        if "<" in raw_s and ">" in raw_s:
+            parts = raw_s.split("<")
+            sender_name = parts[0].strip(' "')
+            sender_email = parts[1].split(">")[0].strip()
+        else:
+            sender_email = raw_s
+
     raw_content = payload.raw_eml or ""
     if not raw_content:
         header_part = payload.email_header or ""
-        text_part = payload.email_text or ""
+        text_part = (payload.body or payload.email_text or "").strip()
+        if not header_part and (sender_email or payload.subject):
+            h_lines = []
+            if payload.subject:
+                h_lines.append(f"Subject: {payload.subject}")
+            if sender_email:
+                s_disp = f"{sender_name} <{sender_email}>" if sender_name else sender_email
+                h_lines.append(f"From: {s_disp}")
+            if payload.recipient:
+                h_lines.append(f"To: {payload.recipient}")
+            if payload.timestamp:
+                h_lines.append(f"Date: {payload.timestamp}")
+            header_part = "\n".join(h_lines)
         raw_content = f"{header_part}\n\n{text_part}".strip()
 
     if not raw_content:
@@ -113,8 +141,15 @@ async def _execute_forensic_pipeline(
 
     # 5. NLP Intent & BEC Threat Scoring
     subject = payload.subject or header_results.get("subject") or "Suspicious Email"
-    body_text = payload.email_text or sanitized_res["clean_text"] or raw_content
-    sender_email = payload.sender_email or header_results.get("header_from") or ""
+    body_text = payload.body or payload.email_text or sanitized_res["clean_text"] or raw_content
+    if not sender_email:
+        h_from = header_results.get("header_from") or ""
+        if "<" in h_from and ">" in h_from:
+            parts = h_from.split("<")
+            sender_name = parts[0].strip(' "')
+            sender_email = parts[1].split(">")[0].strip()
+        else:
+            sender_email = h_from
 
     nlp_results = nlp_agent.analyze_content(text=body_text, subject=subject, sender_email=sender_email)
 
@@ -185,8 +220,48 @@ async def _execute_forensic_pipeline(
             f"DKIM Cryptographic Integrity Failed: {dkim_crypto_res.get('reason')}"
         )
 
-    # 9.6 Multi-Feed External CTI Connectors (Phase 7)
-    extracted_urls = re.findall(r'https?://[^\s<>"\']+', (body_text or "") + " " + (html_content or ""))
+    # 9.6 Multi-Feed External CTI Connectors & Comprehensive URL Analysis
+    gathered_url_map = {}
+    if payload.urls:
+        for u_item in payload.urls:
+            if isinstance(u_item, dict):
+                href = u_item.get("href") or u_item.get("url")
+                d_text = u_item.get("display_text") or u_item.get("text") or href
+                if href:
+                    gathered_url_map[href] = d_text
+            elif isinstance(u_item, str) and u_item:
+                gathered_url_map[u_item] = u_item
+
+    regex_urls = re.findall(r'https?://[^\s<>"\']+', (body_text or "") + " " + (html_content or ""))
+    for ru in regex_urls:
+        cleaned_ru = ru.rstrip(']>).\'"')
+        if cleaned_ru and cleaned_ru not in gathered_url_map:
+            gathered_url_map[cleaned_ru] = cleaned_ru
+
+    extracted_urls = list(gathered_url_map.keys())
+
+    # Deep URL Intelligence Enrichment
+    url_intelligence_list = []
+    highest_url_score = 0.0
+    for u_str, d_text in gathered_url_map.items():
+        score, meta = analyze_url(u_str)
+        intel = meta.get("intel") or {}
+        u_domain = intel.get("primary_domain") or intel.get("domain") or (u_str.split("//")[-1].split("/")[0])
+        u_verdict = intel.get("verdict") or ("Malicious" if score >= 71 else ("Suspicious" if score >= 31 else "Safe"))
+        highest_url_score = max(highest_url_score, float(score))
+        
+        url_intelligence_list.append({
+            "url": u_str,
+            "display_text": d_text or u_str,
+            "domain": u_domain,
+            "lexical_risk": score,
+            "verdict": u_verdict,
+            "domain_age_days": meta.get("domain_age_days"),
+            "status": "ENRICHED" if intel else "NOT ENRICHED",
+            "evidence": intel.get("evidence") or [],
+            "reputation": "FLAGGED" if score >= 71 else ("SUSPICIOUS" if score >= 31 else "CLEAN")
+        })
+
     cti_records = await cti_service.query_all_threat_feeds(
         urls=extracted_urls,
         origin_ip=origin_node.get("ip") if not origin_node.get("is_private") else None
@@ -201,7 +276,9 @@ async def _execute_forensic_pipeline(
     # 10. Multi-Vector Risk Fusion 2.0
     header_score = header_results.get("header_score", 0.0)
     nlp_score = nlp_results.get("nlp_risk", 0.0)
-    url_score = 75.0 if "microsoft" in sender_email.lower() and "microsoft.com" not in sender_email.lower() else 10.0
+    url_score = 75.0 if "microsoft" in sender_email.lower() and "microsoft.com" not in sender_email.lower() else (0.0 if not gathered_url_map else 10.0)
+    if highest_url_score > 0:
+        url_score = max(url_score, highest_url_score)
     
     if homoglyph_data.get("has_homoglyphs"):
         url_score = max(url_score, 88.0)
@@ -280,6 +357,199 @@ async def _execute_forensic_pipeline(
     if origin_node.get("is_anonymized"):
         mitre_tactics.append("T1090.003 - Proxy: Multi-hop Proxy")
 
+    # 11. Dynamic "WHY THIS WAS FLAGGED" Evidence-Based Explanation Generation
+    why_flagged = []
+    auth_data = header_results.get("authentication", {})
+    spf_val = auth_data.get("spf", {}).get("status", "None")
+    dkim_val = dkim_crypto_res.get("verification_status") or auth_data.get("dkim", {}).get("status", "None")
+    dmarc_val = auth_data.get("dmarc", {}).get("status", "None")
+
+    if homoglyph_data.get("has_homoglyphs"):
+        target_b = homoglyph_data.get("target_brand") or "protected brand"
+        why_flagged.append({
+            "category": "Domain Impersonation",
+            "explanation": f"Sender domain resembles protected brand domain ({target_b}) using deceptive unicode homoglyphs.",
+            "evidence": f"Mimic domain: {homoglyph_data.get('raw_domain')} (Target: {target_b})",
+            "severity": "CRITICAL",
+            "contribution": 30.0
+        })
+    elif homoglyph_data.get("target_brand") and homoglyph_data.get("risk_score_modifier", 0) > 0:
+        why_flagged.append({
+            "category": "Brand Impersonation",
+            "explanation": f"Sender domain closely aligns with protected brand ({homoglyph_data.get('target_brand')}) without authorization.",
+            "evidence": f"Sender domain: {sender_domain}",
+            "severity": "HIGH",
+            "contribution": 20.0
+        })
+
+    flagged_urls = [u for u in url_intelligence_list if u.get("lexical_risk", 0) >= 35]
+    if flagged_urls:
+        top_u = max(flagged_urls, key=lambda x: x.get("lexical_risk", 0))
+        defanged_u = top_u["url"].replace("http", "hxxp").replace(".", "[.]")
+        why_flagged.append({
+            "category": "Suspicious URL",
+            "explanation": f"Message contains hyperlink with abnormal lexical characteristics or known threat patterns (Risk: {top_u['lexical_risk']}%).",
+            "evidence": defanged_u[:90] + ("..." if len(defanged_u) > 90 else ""),
+            "severity": "CRITICAL" if top_u["lexical_risk"] >= 70 else "HIGH",
+            "contribution": round(top_u["lexical_risk"] * 0.35, 1)
+        })
+
+    if quishing_evidence_dict.get("has_qr_code"):
+        first_payload = quishing_evidence_dict.get("defanged_payloads", ["QR target"])[0]
+        why_flagged.append({
+            "category": "Quishing (QR Phishing)",
+            "explanation": "Detected 2D matrix barcode (QR code) designed to evade traditional text perimeter filters.",
+            "evidence": f"Decoded destination: {first_payload}",
+            "severity": "CRITICAL" if quishing_evidence_dict.get("risk_level") == "malicious" else "HIGH",
+            "contribution": 25.0
+        })
+
+    if dkim_val == "FAIL" or str(dmarc_val).lower() == "fail" or str(spf_val).lower() in ["fail", "softfail"]:
+        fail_reasons = []
+        if str(spf_val).lower() in ["fail", "softfail"]:
+            fail_reasons.append(f"SPF {spf_val}")
+        if dkim_val == "FAIL":
+            fail_reasons.append(f"DKIM {dkim_val} ({dkim_crypto_res.get('reason') or 'signature mismatch'})")
+        if str(dmarc_val).lower() == "fail":
+            fail_reasons.append("DMARC alignment failure")
+        why_flagged.append({
+            "category": "Authentication Anomaly",
+            "explanation": "Cryptographic email sender identity verification failed: " + "; ".join(fail_reasons) + ".",
+            "evidence": f"SPF: {spf_val} | DKIM: {dkim_val} | DMARC: {dmarc_val}",
+            "severity": "HIGH",
+            "contribution": 20.0
+        })
+
+    if nlp_results.get("financial_intent") or nlp_results.get("urgency_score", 0) >= 60:
+        why_flagged.append({
+            "category": "Social Engineering",
+            "explanation": "Natural language analysis detected high urgency and coercive pressure targeting financial or credential compromise.",
+            "evidence": f"Urgency index: {nlp_results.get('urgency_score', 0):.0f}% | Financial intent: {nlp_results.get('financial_intent', False)}",
+            "severity": "HIGH",
+            "contribution": 20.0
+        })
+
+    if nlp_results.get("vip_impersonation", {}).get("is_vip_impersonation"):
+        matched_vip = nlp_results["vip_impersonation"].get("matched_vip_name") or "Executive"
+        why_flagged.append({
+            "category": "VIP / Executive Impersonation",
+            "explanation": f"Sender display name mimics protected executive roster profile ({matched_vip}) originating from an external domain.",
+            "evidence": f"Header display name matches VIP roster: {matched_vip}",
+            "severity": "CRITICAL",
+            "contribution": 30.0
+        })
+
+    if has_cti_malicious:
+        matched_cti = next((r for r in cti_records if r.get("is_malicious")), None)
+        if matched_cti:
+            why_flagged.append({
+                "category": "Threat Intelligence Match",
+                "explanation": f"Threat indicator confirmed active in external cyber intelligence feed [{matched_cti.get('source')}].",
+                "evidence": f"Indicator: {matched_cti.get('indicator')} ({matched_cti.get('threat_category') or 'Malicious'})",
+                "severity": "CRITICAL",
+                "contribution": 35.0
+            })
+
+    if has_malicious_att:
+        why_flagged.append({
+            "category": "Malicious Attachment",
+            "explanation": "Quarantined email attachment contains high entropy or known exploit patterns.",
+            "evidence": f"Attachment: {attachment_evidence[0].get('filename', 'payload.bin')}",
+            "severity": "CRITICAL",
+            "contribution": 30.0
+        })
+
+    if origin_node.get("is_anonymized"):
+        why_flagged.append({
+            "category": "Infrastructure Anomaly",
+            "explanation": f"ERPN relay tracking traced origin IP to an anonymized transit node ({origin_node.get('anonymization_type') or 'Tor/Proxy'}).",
+            "evidence": f"Origin IP: {origin_node.get('defanged_ip') or origin_node.get('ip')} ({origin_node.get('country')})",
+            "severity": "MEDIUM",
+            "contribution": 15.0
+        })
+
+    if not why_flagged:
+        why_flagged.append({
+            "category": "Baseline Assessment",
+            "explanation": "Insufficient evidence to generate a detailed explanation.",
+            "evidence": "No malicious indicators detected across active inspection engines.",
+            "severity": "LOW",
+            "contribution": 0.0
+        })
+
+    # 12. Structured Risk Factors Mapping
+    risk_factors = {
+        "url_intelligence": {
+            "name": "URL Intelligence",
+            "score": round(url_score, 1) if (url_intelligence_list or payload.urls) else None,
+            "status": "ENRICHED" if (url_intelligence_list or payload.urls) else "NOT ENRICHED",
+            "severity": "HIGH_RISK" if url_score >= 70 else ("SUSPICIOUS" if url_score >= 35 else "SAFE"),
+            "explanation": f"{len(url_intelligence_list)} URL(s) inspected with lexical & reputation analysis." if url_intelligence_list else "No URLs found in message body."
+        },
+        "domain_intelligence": {
+            "name": "Domain Intelligence",
+            "score": 90.0 if homoglyph_data.get("has_homoglyphs") else (15.0 if sender_domain else None),
+            "status": "ENRICHED" if sender_domain else "NOT ENRICHED",
+            "severity": "HIGH_RISK" if homoglyph_data.get("has_homoglyphs") else "SAFE",
+            "explanation": f"Domain {sender_domain}: " + ("Homoglyph spoofing detected" if homoglyph_data.get("has_homoglyphs") else "Standard domain profile")
+        },
+        "social_engineering": {
+            "name": "Social Engineering",
+            "score": round(nlp_score, 1),
+            "status": "ENRICHED" if body_text else "NOT ENRICHED",
+            "severity": "HIGH_RISK" if nlp_score >= 70 else ("SUSPICIOUS" if nlp_score >= 35 else "SAFE"),
+            "explanation": nlp_results.get("threat_category", "NLP cognitive intent evaluated.")
+        },
+        "authentication": {
+            "name": "Authentication",
+            "score": 85.0 if (dkim_val == "FAIL" or str(dmarc_val).lower() == "fail") else 10.0,
+            "status": "ENRICHED" if (header_results.get("authentication") or dkim_crypto_res.get("verification_status") != "NONE") else "NOT ENRICHED",
+            "severity": "HIGH_RISK" if (dkim_val == "FAIL" or str(dmarc_val).lower() == "fail") else "SAFE",
+            "explanation": f"SPF: {spf_val}, DKIM: {dkim_val}, DMARC: {dmarc_val}"
+        },
+        "threat_intelligence": {
+            "name": "Threat Intelligence",
+            "score": 95.0 if has_cti_malicious else (0.0 if cti_records else None),
+            "status": "ENRICHED" if cti_records else "NOT ENRICHED",
+            "severity": "HIGH_RISK" if has_cti_malicious else "SAFE",
+            "explanation": f"{len(cti_records)} feed query results returned." if cti_records else "External threat feeds not configured or unreached."
+        },
+        "infrastructure": {
+            "name": "Infrastructure",
+            "score": 75.0 if origin_node.get("is_anonymized") else round(origin_risk, 1),
+            "status": "ENRICHED" if origin_node.get("ip") else "NOT ENRICHED",
+            "severity": "HIGH_RISK" if origin_node.get("is_anonymized") else ("SUSPICIOUS" if origin_risk >= 35 else "SAFE"),
+            "explanation": f"Transit origin {origin_node.get('country') or 'Unknown'} (ASN {origin_node.get('asn') or 'N/A'})"
+        },
+        "ssl_tls": {
+            "name": "SSL / TLS",
+            "score": None,
+            "status": "NOT ENRICHED",
+            "severity": "NOT_ENRICHED",
+            "explanation": "Direct TLS session handshake telemetry not captured by HTTP relay"
+        }
+    }
+
+    # 13. Email Metadata Record
+    recipient_addr = payload.recipient or header_results.get("header_to") or "analyst@security.internal"
+    received_stamp = payload.timestamp or case_record["created_at"]
+    email_metadata = {
+        "platform": payload.platform or "gmail",
+        "subject": subject,
+        "sender": {
+            "name": sender_name or (sender_email.split("@")[0] if "@" in sender_email else "Sender"),
+            "email": sender_email
+        },
+        "recipient": recipient_addr,
+        "body": body_text,
+        "received": received_stamp,
+        "thread_id": payload.thread_id,
+        "urls": [
+            {"display_text": u.get("display_text") or u.get("url"), "href": u.get("url")}
+            for u in url_intelligence_list
+        ] if url_intelligence_list else []
+    }
+
     reasoning_parts = []
     if quishing_evidence_dict.get("has_qr_code"):
         reasoning_parts.append(f"inline QR matrix quishing lure decoded ({quishing_evidence_dict['qr_count']} target(s))")
@@ -342,9 +612,16 @@ async def _execute_forensic_pipeline(
         "dkim_verification": dkim_crypto_res,
         "transformer_nlp": nlp_results.get("transformer_nlp"),
         "vip_impersonation": nlp_results.get("vip_impersonation"),
+        "why_flagged": why_flagged,
+        "email_metadata": email_metadata,
+        "risk_factors": risk_factors,
+        "url_intelligence_list": url_intelligence_list,
         "created_at": case_record["created_at"]
     }
 
+    # Store email_metadata in case record as well for quick listing/indexing
+    case_record["email_metadata"] = email_metadata
+    case_record["why_flagged"] = why_flagged
     evidence_vault.store_analysis(case_record["id"], analysis_dict)
     return analysis_dict
 
@@ -486,9 +763,22 @@ def download_quarantined_attachment(case_id: str, sha256: str):
 @forensic_router.get("/cases")
 def list_forensic_cases(limit: int = 50):
     """Lists all stored forensic cases from the Evidence Vault."""
+    cases = evidence_vault.list_cases(limit=limit)
+    enriched_cases = []
+    for case in cases:
+        case_id = case.get("id", "")
+        analysis = analyses_vault.get(case_id) or {}
+        enriched_cases.append({
+            **case,
+            "final_risk": analysis.get("final_risk", case.get("overall_risk_score", 0)),
+            "verdict": analysis.get("verdict", case.get("severity", "UNKNOWN")),
+            "originating_node": analysis.get("originating_node"),
+            "threat_category": analysis.get("threat_category", case.get("threat_category")),
+        })
+    total_count = len(cases_vault) if cases_vault else len(cases)
     return {
-        "total": len(evidence_vault.list_cases(limit=1000)),
-        "cases": evidence_vault.list_cases(limit=limit)
+        "total": max(total_count, len(enriched_cases)),
+        "cases": enriched_cases
     }
 
 
@@ -758,13 +1048,21 @@ async def lookup_cti_threat_feeds(query: Optional[str] = None, indicator: Option
 
     has_malicious = any(r.get("is_malicious") for r in records)
     max_confidence = max((r.get("confidence_score", 0.0) for r in records), default=0.0)
+    vpn_or_tor = any(
+        r.get("vpn_detected") or "Tor" in str(r.get("details", {})) or "Tor" in str(r.get("threat_category", ""))
+        for r in records
+    )
+    malicious_hits = sum(1 for r in records if r.get("is_malicious"))
 
     return {
         "query": clean_query,
+        "indicator": clean_query,
         "is_malicious": has_malicious,
         "max_confidence": max_confidence,
         "verdict": "MALICIOUS" if has_malicious else "CLEAN_BENIGN",
         "feed_count": len(records),
+        "malicious_hits": malicious_hits,
+        "vpn_or_tor": vpn_or_tor,
         "records": records
     }
 
@@ -775,7 +1073,14 @@ def get_campaign_communities():
     Executes the Louvain modularity clustering algorithm to partition
     multi-case threat entities into named attack syndicates (e.g. SYNDICATE-FIN7-M365).
     """
-    return threat_graph_manager.get_louvain_communities()
+    res = threat_graph_manager.get_louvain_communities()
+    if isinstance(res, dict):
+        comms = res.get("communities", [])
+        res["syndicates"] = comms
+        res["syndicates_count"] = len(comms)
+        if "modularity_score" not in res and "modularity" in res:
+            res["modularity_score"] = res["modularity"]
+    return res
 
 
 @forensic_router.get("/vip-roster")

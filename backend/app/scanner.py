@@ -762,7 +762,7 @@ class HybridConsensusScanner:
             }
         try:
             context = ssl.create_default_context()
-            with socket.create_connection((hostname, 443), timeout=3) as sock:
+            with socket.create_connection((hostname, 443), timeout=2.0) as sock:
                 with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                     cert = ssock.getpeercert() or {}
             issuer = "Unknown"
@@ -873,13 +873,17 @@ class HybridConsensusScanner:
             return out
 
         try:
-            answers = dns.resolver.resolve(hostname, "A")
+            resolver = dns.resolver.Resolver()
+            resolver.lifetime = 2.0
+            answers = resolver.resolve(hostname, "A")
             out["a"] = [str(a) for a in answers]
         except Exception:
             out["a"] = []
 
         try:
-            answers = dns.resolver.resolve(hostname, "MX")
+            resolver = dns.resolver.Resolver()
+            resolver.lifetime = 2.0
+            answers = resolver.resolve(hostname, "MX")
             out["mx"] = [str(mx.exchange).rstrip(".") for mx in answers]
         except Exception:
             out["mx"] = []
@@ -891,10 +895,14 @@ class HybridConsensusScanner:
         if not hostname or whois is None:
             return out
 
+        import concurrent.futures
         try:
-            w = whois.whois(hostname)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(whois.whois, hostname)
+                w = future.result(timeout=2.0)
+
             created = None
-            cd = w.creation_date
+            cd = getattr(w, "creation_date", None)
             if isinstance(cd, list) and cd:
                 created = cd[0]
             elif cd:
@@ -931,7 +939,7 @@ class HybridConsensusScanner:
             return out
 
         try:
-            r = requests.get(url, timeout=6, allow_redirects=True)
+            r = requests.get(url, timeout=2.0, allow_redirects=True)
             history = [h.url for h in r.history] + [r.url]
             out["redirect_chain"] = history
             out["redirect_hops"] = max(len(history) - 1, 0)

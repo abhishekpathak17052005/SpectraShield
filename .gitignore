@@ -35,6 +35,7 @@ spec.md
 upgrade-struct.md
 *.pdf
 *.7z
+*.zip
 backend/data/quarantine/
 data/quarantine/
 upgraded-spec.md 

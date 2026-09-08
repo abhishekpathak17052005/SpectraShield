@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 import logging
 import time
 from typing import Dict, List, Optional, Any, Tuple

@@ -49,6 +49,8 @@ def _set_nested(target: dict[str, Any], dotted_key: str, value: Any) -> None:
     current[parts[-1]] = value
 
 
+from contextlib import contextmanager
+
 class PostgresCollection:
     """
     High-performance PostgreSQL / Supabase JSONB collection driver.
@@ -62,12 +64,51 @@ class PostgresCollection:
         key_column: str,
         key_field: str,
         extra_columns: list[str] | None = None,
+        connection_url: str | None = None,
     ):
         self.connection = connection
+        self.connection_url = connection_url
         self.table_name = table_name
         self.key_column = key_column
         self.key_field = key_field
         self.extra_columns = extra_columns or []
+
+    def _ensure_connection(self):
+        if self.connection is None or getattr(self.connection, "closed", 0) != 0:
+            if self.connection_url:
+                try:
+                    import psycopg2
+                    from psycopg2.extras import RealDictCursor
+                    self.connection = psycopg2.connect(self.connection_url, cursor_factory=RealDictCursor)
+                    self.connection.autocommit = True
+                except Exception:
+                    pass
+
+    @contextmanager
+    def _cursor(self):
+        self._ensure_connection()
+        try:
+            cur = self.connection.cursor()
+            try:
+                yield cur
+            finally:
+                cur.close()
+        except Exception:
+            if self.connection_url:
+                try:
+                    import psycopg2
+                    from psycopg2.extras import RealDictCursor
+                    self.connection = psycopg2.connect(self.connection_url, cursor_factory=RealDictCursor)
+                    self.connection.autocommit = True
+                    cur = self.connection.cursor()
+                    try:
+                        yield cur
+                    finally:
+                        cur.close()
+                    return
+                except Exception:
+                    pass
+            raise
 
     def _row_to_doc(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row.get("payload") or {})
@@ -140,7 +181,7 @@ class PostgresCollection:
         if where_parts:
             sql += " WHERE " + " AND ".join(where_parts)
 
-        with self.connection.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
 
@@ -173,7 +214,7 @@ class PostgresCollection:
             f"VALUES ({', '.join(placeholders)})"
         )
 
-        with self.connection.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(sql, values)
 
         return str(key_val)
@@ -204,7 +245,7 @@ class PostgresCollection:
 
     def delete_many(self, flt: dict[str, Any] | None) -> DeleteResult:
         if not flt:
-            with self.connection.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(f"DELETE FROM {self.table_name}")
                 deleted = cur.rowcount
             return DeleteResult(deleted_count=int(deleted or 0))
@@ -219,7 +260,7 @@ class PostgresCollection:
         if not keys_to_delete:
             return DeleteResult(deleted_count=0)
 
-        with self.connection.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 f"DELETE FROM {self.table_name} WHERE {self.key_column} = ANY(%s)",
                 (keys_to_delete,),
@@ -256,7 +297,7 @@ class PostgresCollection:
                     values.append(merged.get(col))
 
             values.append(key_val)
-            with self.connection.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     f"UPDATE {self.table_name} SET {', '.join(set_sql_parts)} WHERE {self.key_column} = %s",
                     values,
@@ -275,6 +316,9 @@ class PostgresCollection:
 
         inserted_id = self._insert_payload(merged)
         return UpdateResult(matched_count=0, modified_count=0, upserted_id=inserted_id)
+
+    def count_documents(self, flt: dict[str, Any] | None = None) -> int:
+        return len(self.find(flt or {}))
 
 
 class InMemoryCollection:
