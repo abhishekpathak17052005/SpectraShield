@@ -65,7 +65,24 @@ app = FastAPI(
 
 
 cors_origins_env = os.getenv("CORS_ORIGINS", "")
-_custom_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+_custom_origins = [o.strip().rstrip("/") for o in cors_origins_env.split(",") if o.strip()]
+
+_regex_patterns = [
+    r"http:\/\/localhost:\d+",
+    r"http:\/\/127\.0\.0\.1:\d+",
+    r"https:\/\/mail\.google\.com",
+    r"https:\/\/.*\.linkedin\.com",
+    r"https:\/\/.*\.vercel\.app",
+    r"https:\/\/.*\.onrender\.com",
+    r"chrome-extension:\/\/.*",
+]
+
+for _orig in _custom_origins:
+    if "*" in _orig:
+        _escaped = re.escape(_orig).replace(r"\*", ".*")
+        _regex_patterns.append(_escaped)
+
+_cors_regex_str = "^(" + "|".join(_regex_patterns) + ")$"
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,7 +95,7 @@ app.add_middleware(
         "https://www.linkedin.com",
         *_custom_origins,
     ],
-    allow_origin_regex=r"^(http:\/\/localhost:\d+|http:\/\/127\.0\.0\.1:\d+|https:\/\/mail\.google\.com|https:\/\/.*\.linkedin\.com|chrome-extension:\/\/.*)$",
+    allow_origin_regex=_cors_regex_str,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -981,7 +998,9 @@ def get_dashboard_risk_heatmap(
 
 
 @app.get("/")
+@app.head("/")
 @app.get("/health")
+@app.head("/health")
 def health_check():
     return {
         "status": "healthy",
