@@ -98,7 +98,7 @@ Deploy the backend first so you have your live API URL ready for the frontend.
    | `PYTHON_VERSION` | `3.11.9` | Python runtime version |
    | `DB_BACKEND` | `in-memory` *(or `supabase`)* | Database engine mode |
    | `JWT_SECRET` | *(Click "Generate" or random 32-char string)* | Auth tokens encryption |
-   | `CORS_ORIGINS` | `https://*.vercel.app` | Allows your Vercel frontend |
+   | `CORS_ORIGINS` | `https://spectrashield.vercel.app` | Exact domain of your Vercel frontend |
    | `DATABASE_URL` | *(Optional: Your PostgreSQL URL)* | Persistent case storage |
    | `VT_API_KEY` | *(Optional: VirusTotal API Key)* | Real-time URL reputation |
    | `OPENPHISH_AUTO_SYNC`| `true` | Daily phishing feed sync |
@@ -164,13 +164,19 @@ This rewrite ensures client-side routes (`/overview`, `/investigations`, `/exten
 
 ## Step 4: Finalize CORS & Domain Security
 
-Once you know your exact Vercel production domain (e.g., `https://spectrashield.vercel.app`):
+Once you deploy your frontend and obtain your exact Vercel production domain (e.g., `https://spectrashield.vercel.app`):
 
 1. Go back to your **Render Dashboard** > `spectrashield-backend` > **Environment**.
-2. Update or verify the `CORS_ORIGINS` variable:
+2. Set the `CORS_ORIGINS` variable to your **exact frontend URL**:
    ```
-   https://spectrashield.vercel.app,https://*.vercel.app
+   https://spectrashield.vercel.app
    ```
+   *(If you have multiple domains or custom domains, separate them with commas, e.g. `https://spectrashield.vercel.app,https://yourdomain.com`)*
+
+> [!CAUTION]
+> **Never use wildcard `https://*.vercel.app` in production CORS!**
+> Anyone in the world can deploy a website on Vercel. If you whitelist `*.vercel.app`, any other user's malicious site on Vercel could execute cross-origin requests from a user's browser to your backend API. Always specify your exact domain.
+
 3. Click **Save Changes**. Render will automatically apply the changes.
 
 ---
