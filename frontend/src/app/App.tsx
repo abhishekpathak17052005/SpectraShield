@@ -22,6 +22,8 @@ import { CtiLookupModal } from "./components/CtiLookupModal";
 import { VipRosterModal } from "./components/VipRosterModal";
 import { AuthRbacModal } from "./components/AuthRbacModal";
 import { getMe, type UserProfile } from "./api";
+import { SocShell } from "./components/soc/SocLayout";
+import type { NavItemKey } from "./components/investigation/Sidebar";
 
 // Lazy-load new pages so a single module failure doesn't crash the whole app
 const LandingPage = lazy(() => import("./components/LandingPage"));
@@ -41,11 +43,11 @@ const ForensicIntelligencePage = lazy(() => import("./components/soc/ForensicInt
 const EvidenceVaultPage = lazy(() => import("./components/soc/EvidenceVaultPage").then(m => ({ default: m.EvidenceVaultPage })));
 const ReportsPage = lazy(() => import("./components/soc/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const SettingsPage = lazy(() => import("./components/soc/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const ExtensionDownloadPage = lazy(() => import("./components/soc/ExtensionDownloadPage").then(m => ({ default: m.ExtensionDownloadPage })));
 
 // Loading spinner shown while lazy module downloads
 const PageLoader = ({ name }: { name: string }) => (
-  <div className="w-full min-h-screen flex items-center justify-center"
-    style={{ background: "linear-gradient(135deg, #05070d 0%, #0b0f1a 100%)" }}>
+  <div className="w-full flex-1 min-h-[400px] flex items-center justify-center">
     <div className="flex flex-col items-center gap-4">
       <div className="w-10 h-10 rounded-full border-2 border-transparent border-t-cyan-400 animate-spin"
         style={{ borderColor: "rgba(0,229,255,0.15)", borderTopColor: "#00e5ff" }} />
@@ -72,8 +74,7 @@ class ViewErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="w-full min-h-screen flex items-center justify-center p-8"
-          style={{ background: "linear-gradient(135deg, #05070d, #0b0f1a)" }}>
+        <div className="w-full flex-1 min-h-[400px] flex items-center justify-center p-8">
           <div className="max-w-lg w-full rounded-2xl border border-red-500/30 p-8 text-center"
             style={{ background: "rgba(239,68,68,0.06)", backdropFilter: "blur(20px)" }}>
             <div className="text-red-400 text-lg font-bold mb-3">⚠ Could not load {this.props.name}</div>
@@ -115,7 +116,8 @@ export type SocRouteState =
   | { route: "forensics" }
   | { route: "evidence" }
   | { route: "reports" }
-  | { route: "settings" };
+  | { route: "settings" }
+  | { route: "extension" };
 
 export const resolveSocRoute = (pathInput: string): SocRouteState => {
   let pathname = pathInput || "";
@@ -194,8 +196,37 @@ export const resolveSocRoute = (pathInput: string): SocRouteState => {
   if (clean === "/settings") {
     return { route: "settings" };
   }
+  if (clean === "/extension" || clean === "/download-extension" || clean === "/download") {
+    return { route: "extension" };
+  }
 
   return { route: "overview" };
+};
+
+export const getActiveNavFromRoute = (r: SocRouteState): NavItemKey => {
+  switch (r.route) {
+    case "overview":
+      return "overview";
+    case "investigations":
+    case "investigation":
+      return "investigations";
+    case "email_intelligence":
+      return "email_intelligence";
+    case "threat_intelligence":
+      return "threat_intelligence";
+    case "forensics":
+      return "forensics";
+    case "evidence":
+      return "evidence";
+    case "reports":
+      return "reports";
+    case "settings":
+      return "settings";
+    case "extension":
+      return "extension";
+    default:
+      return "overview";
+  }
 };
 
 const AppContent = () => {
@@ -329,103 +360,92 @@ const AppContent = () => {
 
   // ─── CORE SOC ARCHITECTURE: 7 FUNCTIONAL WORKSPACES ──────────────────────────
   if (!legacyView) {
+    let socContent: React.ReactNode = null;
+
     if (socRoute.route === "overview") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="SOC Overview">
-            <OverviewPage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
+      socContent = (
+        <SafeView name="SOC Overview">
+          <OverviewPage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "investigations") {
+      socContent = (
+        <SafeView name="Incident Investigations">
+          <InvestigationsListPage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "investigation") {
+      socContent = (
+        <SafeView name="Security Investigation">
+          <InvestigationPage
+            initialId={socRoute.caseId}
+            onNavigate={navigateTo}
+            onBackToDashboard={() => navigateTo("/overview")}
+            onNavigateToCase={(cId) => navigateTo(`/investigations/${cId}`)}
+          />
+        </SafeView>
+      );
+    } else if (socRoute.route === "email_intelligence") {
+      socContent = (
+        <SafeView name="Email Intelligence">
+          <EmailIntelligencePage
+            caseId={socRoute.caseId}
+            onNavigate={navigateTo}
+          />
+        </SafeView>
+      );
+    } else if (socRoute.route === "threat_intelligence") {
+      socContent = (
+        <SafeView name="Threat Intelligence">
+          <ThreatIntelligencePage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "forensics") {
+      socContent = (
+        <SafeView name="Forensic Intelligence">
+          <ForensicIntelligencePage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "evidence") {
+      socContent = (
+        <SafeView name="Evidence Vault">
+          <EvidenceVaultPage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "reports") {
+      socContent = (
+        <SafeView name="Forensic Reports">
+          <ReportsPage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "settings") {
+      socContent = (
+        <SafeView name="System Settings">
+          <SettingsPage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else if (socRoute.route === "extension") {
+      socContent = (
+        <SafeView name="Browser Extension">
+          <ExtensionDownloadPage onNavigate={navigateTo} />
+        </SafeView>
+      );
+    } else {
+      socContent = (
+        <SafeView name="SOC Overview">
+          <OverviewPage onNavigate={navigateTo} />
+        </SafeView>
       );
     }
 
-    if (socRoute.route === "investigations") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Incident Investigations">
-            <InvestigationsListPage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "investigation") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Security Investigation">
-            <InvestigationPage
-              initialId={socRoute.caseId}
-              onNavigate={navigateTo}
-              onBackToDashboard={() => navigateTo("/overview")}
-              onNavigateToCase={(cId) => navigateTo(`/investigations/${cId}`)}
-            />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "email_intelligence") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Email Intelligence">
-            <EmailIntelligencePage
-              caseId={socRoute.caseId}
-              onNavigate={navigateTo}
-            />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "threat_intelligence") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Threat Intelligence">
-            <ThreatIntelligencePage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "forensics") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Forensic Intelligence">
-            <ForensicIntelligencePage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "evidence") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Evidence Vault">
-            <EvidenceVaultPage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "reports") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="Forensic Reports">
-            <ReportsPage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
-      );
-    }
-
-    if (socRoute.route === "settings") {
-      return (
-        <div className="relative w-full min-h-screen">
-          <SafeView name="System Settings">
-            <SettingsPage onNavigate={navigateTo} />
-          </SafeView>
-        </div>
-      );
-    }
+    return (
+      <SocShell
+        activeNav={getActiveNavFromRoute(socRoute)}
+        onNavigate={navigateTo}
+      >
+        {socContent}
+      </SocShell>
+    );
   }
 
   // Extension Popup View

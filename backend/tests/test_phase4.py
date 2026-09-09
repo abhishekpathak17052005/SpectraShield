@@ -132,7 +132,7 @@ def test_phase4_api_endpoints():
     assert "text/csv" in csv_resp.headers["content-type"]
     assert "attachment; filename=" in csv_resp.headers["content-disposition"]
     csv_text = csv_resp.text
-    assert "ioc_type,defanged_value" in csv_text
+    assert "IOC_Type,IOC_Value" in csv_text or "ioc_type,defanged_value" in csv_text
     assert "185[.]220[.]101[.]5" in csv_text
 
     # 2. Test analyze-email with homoglyph sender

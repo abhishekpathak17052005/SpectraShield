@@ -91,23 +91,27 @@ export const InfrastructureTab: React.FC<Props> = ({ infrastructure }) => {
       sublabel: "Domain Registration Lifespan",
       status: isUnenriched(domainAge)
         ? "NOT ENRICHED"
-        : infrastructure?.domainAge?.includes("days") && parseInt(domainAge) < 30
+        : parseInt(domainAge) < 30
         ? "NEWLY REGISTERED"
-        : "DOMAIN AGE KNOWN",
+        : parseInt(domainAge) < 90
+        ? "RECENT REGISTRATION"
+        : "ESTABLISHED DOMAIN",
       statusColor: isUnenriched(domainAge)
         ? "text-slate-500 bg-slate-700/20 border-slate-600/20"
         : parseInt(domainAge) < 30
         ? "text-red-400 bg-red-500/10 border-red-500/30"
+        : parseInt(domainAge) < 90
+        ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
         : "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
       icon: Calendar,
     },
     {
       title: "SSL Status",
-      value: sslValid ? "Valid" : sslStatus,
+      value: sslValid ? "Valid" : isUnenriched(sslStatus) ? "NOT ENRICHED" : sslStatus,
       sublabel: `Issuer: ${sslIssuer}`,
-      status: sslStatus === "UNKNOWN" ? "NOT ENRICHED" : sslValid ? "VALID TLS" : "INVALID TLS",
+      status: isUnenriched(sslStatus) ? "NOT ENRICHED" : sslValid ? "VALID TLS" : "INVALID TLS",
       statusColor:
-        sslStatus === "UNKNOWN"
+        isUnenriched(sslStatus)
           ? "text-slate-500 bg-slate-700/20 border-slate-600/20"
           : sslValid
           ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
@@ -139,17 +143,26 @@ export const InfrastructureTab: React.FC<Props> = ({ infrastructure }) => {
     },
     {
       title: "Abuse Score",
-      value: infrastructure?.abuseConfidenceScore != null && infrastructure.abuseConfidenceScore > 0
+      value: typeof infrastructure?.abuseConfidenceScore === "number"
         ? `${infrastructure.abuseConfidenceScore}%`
         : "NOT ENRICHED",
       sublabel: "Global Abuse Confidence",
-      status: (infrastructure?.abuseConfidenceScore ?? 0) >= 50 ? "HIGH ABUSE CONFIDENCE" : (infrastructure?.abuseConfidenceScore ?? 0) > 0 ? "LOW ABUSE CONFIDENCE" : "NOT ENRICHED",
+      status:
+        typeof infrastructure?.abuseConfidenceScore !== "number"
+          ? "NOT ENRICHED"
+          : infrastructure.abuseConfidenceScore >= 50
+          ? "HIGH ABUSE CONFIDENCE"
+          : infrastructure.abuseConfidenceScore > 0
+          ? "LOW ABUSE CONFIDENCE"
+          : "CLEAN / BENIGN IP",
       statusColor:
-        (infrastructure?.abuseConfidenceScore ?? 0) >= 50
+        typeof infrastructure?.abuseConfidenceScore !== "number"
+          ? "text-slate-500 bg-slate-700/20 border-slate-600/20"
+          : infrastructure.abuseConfidenceScore >= 50
           ? "text-red-400 bg-red-500/15 border-red-500/40 font-bold"
-          : (infrastructure?.abuseConfidenceScore ?? 0) > 0
+          : infrastructure.abuseConfidenceScore > 0
           ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
-          : "text-slate-500 bg-slate-700/20 border-slate-600/20",
+          : "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
       icon: Radio,
     },
   ];
@@ -226,12 +239,14 @@ export const InfrastructureTab: React.FC<Props> = ({ infrastructure }) => {
 
         <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1">
           <span className="text-[10px] uppercase text-slate-500 font-bold">Transport Layer Security</span>
-          <div className={`text-sm font-bold ${sslValid ? "text-emerald-400" : "text-slate-400"}`}>
-            {sslValid ? `Valid (${sslIssuer})` : sslStatus === "UNKNOWN" ? "NOT ENRICHED" : `${sslStatus} (${sslIssuer})`}
+          <div className={`text-sm font-bold ${sslValid ? "text-emerald-400" : isUnenriched(sslStatus) ? "text-slate-400" : "text-amber-400"}`}>
+            {sslValid ? `Valid (${sslIssuer})` : isUnenriched(sslStatus) ? "NOT ENRICHED" : `${sslStatus} (${sslIssuer})`}
           </div>
-          {ssl?.daysUntilExpiry != null && ssl.daysUntilExpiry > 0 && (
+          {ssl?.daysUntilExpiry != null && ssl.daysUntilExpiry > 0 ? (
             <div className="text-slate-400 text-[11px]">{ssl.daysUntilExpiry} days remaining</div>
-          )}
+          ) : ssl?.subjectCN && !isUnenriched(ssl.subjectCN) ? (
+            <div className="text-slate-400 text-[11px]">Subject: {ssl.subjectCN}</div>
+          ) : null}
         </div>
 
         <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1">

@@ -278,9 +278,31 @@ class PIIRedactor:
         for key, value in forensic_data.items():
             if key == 'email_metadata':
                 # Redact email addresses and subject
+                sender_val = value.get('sender')
+                if isinstance(sender_val, dict):
+                    redacted_sender = {
+                        k: self.redact_text(v) if isinstance(v, str) else v
+                        for k, v in sender_val.items()
+                    }
+                elif isinstance(sender_val, str):
+                    redacted_sender = self.redact_text(sender_val)
+                else:
+                    redacted_sender = sender_val
+
+                recip_val = value.get('recipient')
+                if isinstance(recip_val, dict):
+                    redacted_recip = {
+                        k: self.redact_text(v) if isinstance(v, str) else v
+                        for k, v in recip_val.items()
+                    }
+                elif isinstance(recip_val, str):
+                    redacted_recip = self.redact_text(recip_val)
+                else:
+                    redacted_recip = recip_val
+
                 redacted[key] = {
-                    'sender': self.redact_text(value.get('sender', '')) if 'sender' in value else value.get('sender'),
-                    'recipient': self.redact_text(value.get('recipient', '')) if 'recipient' in value else value.get('recipient'),
+                    'sender': redacted_sender,
+                    'recipient': redacted_recip,
                     'subject': self.redact_text(value.get('subject', '')) if 'subject' in value else value.get('subject'),
                     'timestamp': value.get('timestamp'),  # Don't redact
                     'message_id': value.get('message_id'),  # Don't redact

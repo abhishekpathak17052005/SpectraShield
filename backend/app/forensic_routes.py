@@ -594,6 +594,39 @@ async def _execute_forensic_pipeline(
             "contribution": 0.0
         })
 
+    # Vector 15: TLS / SSL Handshake Extraction & Domain Lifespan
+    domain_age_days = None
+    ssl_host = None
+    for u in url_intelligence_list:
+        if u.get("domain_age_days") is not None:
+            domain_age_days = u["domain_age_days"]
+        raw_u = u.get("url") or ""
+        clean_h = re.sub(r'[^\w.-]', '', raw_u.replace("https://", "").replace("http://", "").split("/")[0])
+        if clean_h and "." in clean_h and not ssl_host:
+            ssl_host = clean_h
+
+    if not ssl_host and sender_domain and "." in sender_domain:
+        ssl_host = re.sub(r'[^\w.-]', '', sender_domain)
+
+    ssl_certificate_data = {
+        "issuer": "None",
+        "expiry_date": None,
+        "is_valid": False,
+        "validation_error": "no-target-host",
+        "subject_common_name": None,
+        "subject_organization": None,
+        "is_self_signed": False
+    }
+    if ssl_host:
+        try:
+            from app.scanner import HybridConsensusScanner
+            ssl_scanner = HybridConsensusScanner(None)
+            ssl_details_res = ssl_scanner._ssl_details(ssl_host)
+            if ssl_details_res:
+                ssl_certificate_data = ssl_details_res
+        except Exception:
+            pass
+
     # 12. Structured Risk Factors Mapping
     risk_factors = {
         "url_intelligence": {
@@ -640,10 +673,11 @@ async def _execute_forensic_pipeline(
         },
         "ssl_tls": {
             "name": "SSL / TLS",
-            "score": None,
-            "status": "NOT ENRICHED",
-            "severity": "NOT_ENRICHED",
-            "explanation": "Direct TLS session handshake telemetry not captured by HTTP relay"
+            "score": 10.0 if ssl_certificate_data.get("is_valid") else (85.0 if ssl_certificate_data.get("validation_error") and ssl_certificate_data.get("validation_error") != "no-target-host" else None),
+            "status": "ENRICHED" if (ssl_certificate_data.get("is_valid") or ssl_certificate_data.get("issuer") not in ("None", "Unknown")) else "NOT ENRICHED",
+            "severity": "SAFE" if ssl_certificate_data.get("is_valid") else ("HIGH_RISK" if ssl_certificate_data.get("validation_error") and ssl_certificate_data.get("validation_error") != "no-target-host" else "NOT_ENRICHED"),
+            "explanation": f"TLS session handshake verified with {ssl_certificate_data.get('issuer', 'Trusted CA')[:40]}." if ssl_certificate_data.get("is_valid") else (ssl_certificate_data.get("validation_error") or "Direct TLS session handshake telemetry not captured by HTTP relay"),
+            "details": ssl_certificate_data
         }
     }
 
@@ -738,6 +772,8 @@ async def _execute_forensic_pipeline(
         "email_metadata": email_metadata,
         "risk_factors": risk_factors,
         "url_intelligence_list": url_intelligence_list,
+        "domain_age_days": domain_age_days,
+        "ssl_certificate": ssl_certificate_data,
         "created_at": case_record["created_at"]
     }
 
@@ -917,6 +953,57 @@ def get_case_details(case_id: str):
     real_case_id = case.get("id") or case_id
     analysis = evidence_vault.get_analysis(real_case_id) or evidence_vault.get_analysis(case_id)
     audit_trail = evidence_vault.get_audit_trail(real_case_id) or evidence_vault.get_audit_trail(case_id)
+
+    if analysis:
+        updated = False
+        # 1. Backfill domain_age_days if missing at top level
+        if analysis.get("domain_age_days") is None:
+            url_list = analysis.get("url_intelligence_list") or []
+            for u in url_list:
+                if u.get("domain_age_days") is not None:
+                    analysis["domain_age_days"] = u["domain_age_days"]
+                    updated = True
+                    break
+
+        # 2. Backfill ssl_certificate if missing or not enriched
+        current_ssl = analysis.get("ssl_certificate")
+        if not current_ssl or not current_ssl.get("is_valid"):
+            ssl_host = None
+            url_list = analysis.get("url_intelligence_list") or []
+            for u in url_list:
+                raw_url = u.get("url") or ""
+                clean_host = re.sub(r'[^\w.-]', '', raw_url.replace("https://", "").replace("http://", "").split("/")[0])
+                if clean_host and "." in clean_host:
+                    ssl_host = clean_host
+                    break
+            if not ssl_host:
+                sender_val = case.get("sender") or ""
+                if "@" in sender_val:
+                    ssl_host = re.sub(r'[^\w.-]', '', sender_val.split("@")[-1])
+
+            if ssl_host:
+                try:
+                    from app.scanner import HybridConsensusScanner
+                    scanner = HybridConsensusScanner(None)
+                    ssl_info = scanner._ssl_details(ssl_host)
+                    if ssl_info and (ssl_info.get("is_valid") or ssl_info.get("issuer") not in ("None", "Unknown")):
+                        analysis["ssl_certificate"] = ssl_info
+                        if "risk_factors" in analysis:
+                            analysis["risk_factors"]["ssl_tls"] = {
+                                "name": "SSL / TLS",
+                                "score": 10.0 if ssl_info.get("is_valid") else 85.0,
+                                "status": "ENRICHED",
+                                "severity": "SAFE" if ssl_info.get("is_valid") else "HIGH_RISK",
+                                "explanation": f"TLS session active: Certificate verified with {ssl_info.get('issuer', 'Trusted CA')[:40]}." if ssl_info.get("is_valid") else (ssl_info.get("validation_error") or "Direct TLS session handshake telemetry not captured by HTTP relay"),
+                                "details": ssl_info
+                            }
+                        updated = True
+                except Exception:
+                    pass
+
+        if updated:
+            evidence_vault.store_analysis(real_case_id, analysis)
+
     return {
         "case": case,
         "analysis": analysis,

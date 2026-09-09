@@ -135,8 +135,11 @@ class STIXExporter:
 
         # Email indicators
         email_meta = self.forensic_data.get('email_metadata', {})
-        if email_meta.get('sender'):
-            sender_ind = self._create_indicator(email_meta['sender'])
+        sender_val = email_meta.get('sender')
+        if isinstance(sender_val, dict):
+            sender_val = sender_val.get('email')
+        if sender_val and isinstance(sender_val, str):
+            sender_ind = self._create_indicator(sender_val)
             if sender_ind:
                 indicators.append(sender_ind)
 

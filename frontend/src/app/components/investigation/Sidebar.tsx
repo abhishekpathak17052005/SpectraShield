@@ -15,6 +15,7 @@ import {
   Moon,
   Sun,
   MailCheck,
+  Puzzle,
 } from "lucide-react";
 
 export type NavItemKey =
@@ -26,7 +27,8 @@ export type NavItemKey =
   | "forensics"
   | "evidence"
   | "reports"
-  | "settings";
+  | "settings"
+  | "extension";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -53,6 +55,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
+  const [selectedNav, setSelectedNav] = React.useState<NavItemKey>(activeItem);
+
+  React.useEffect(() => {
+    setSelectedNav(activeItem);
+  }, [activeItem]);
 
   React.useEffect(() => {
     setMounted(true);
@@ -87,13 +94,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "settings", label: "Settings", icon: Settings },
       ],
     },
+    {
+      title: "Deployment",
+      items: [
+        { key: "extension", label: "Browser Extension", icon: Puzzle, badge: "GET" },
+      ],
+    },
   ];
 
   return (
     <motion.aside
       animate={{ width: collapsed ? 72 : 248 }}
       transition={{ duration: 0.25, ease: "easeInOut" }}
-      className="h-screen sticky top-0 flex flex-col justify-between border-r z-30 select-none flex-shrink-0 bg-sidebar-background border-sidebar-border"
+      className="h-screen sticky top-0 left-0 self-start flex flex-col justify-between border-r z-30 select-none flex-shrink-0 bg-sidebar-background border-sidebar-border"
     >
       {/* Top Section: Logo & Toggle */}
       <div>
@@ -146,15 +159,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* Section Items */}
               {section.items.map((item) => {
                 const Icon = item.icon;
+                const effectiveActive = selectedNav || activeItem;
                 const isActive =
-                  activeItem === item.key ||
+                  effectiveActive === item.key ||
                   ((item.key === "email_intelligence" || item.key === "mail_intelligence") &&
-                    (activeItem === "email_intelligence" || activeItem === "mail_intelligence"));
+                    (effectiveActive === "email_intelligence" || effectiveActive === "mail_intelligence"));
 
                 return (
                   <button
                     key={item.key}
-                    onClick={() => onSelectItem?.(item.key)}
+                    onClick={() => {
+                      setSelectedNav(item.key);
+                      onSelectItem?.(item.key);
+                    }}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-all relative group overflow-hidden border ${
                       isActive
                         ? "text-sidebar-active-foreground border-accent/30 shadow-[0_0_16px_rgba(6,182,212,0.08)]"
