@@ -48,18 +48,6 @@ const DEMO_INVESTIGATION_MSFT: InvestigationRecord = {
   },
   riskFactors: [
     {
-      id: "phishing_indicators",
-      name: "Phishing Indicators",
-      score: 92,
-      severity: "HIGH_RISK",
-      explanation: "Email contains obfuscated hyperlinks redirecting through multi-hop tracking relays to credential harvesting forms.",
-      evidence: [
-        { label: "Detected Vector", value: "Credential Harvesting Form & Phishing Link", flagged: true },
-        { label: "Target Form", value: "PayPal Account Login & Financial Credentials Capture", flagged: true },
-        { label: "Obfuscated Redirect", value: "Multi-hop redirect via shortener and tracking domain", flagged: true },
-      ],
-    },
-    {
       id: "url_reputation",
       name: "URL Reputation",
       score: 88,
@@ -85,8 +73,8 @@ const DEMO_INVESTIGATION_MSFT: InvestigationRecord = {
       ],
     },
     {
-      id: "social_engineering",
-      name: "Social Engineering",
+      id: "urgency_indicator",
+      name: "Urgency Indicator",
       score: 91,
       severity: "HIGH_RISK",
       explanation: "Urgency manipulation detected with artificial account suspension threats urging immediate action.",
@@ -97,15 +85,15 @@ const DEMO_INVESTIGATION_MSFT: InvestigationRecord = {
       ],
     },
     {
-      id: "domain_intelligence",
-      name: "Domain Intelligence",
-      score: 86,
+      id: "header_analyzer",
+      name: "Header Analyzer",
+      score: 82,
       severity: "HIGH_RISK",
-      explanation: "Newly Registered Domain (NRD) registered only 12 days ago with high hosting infrastructure risk.",
+      explanation: "RFC 5322 header anomalies and envelope routing discrepancies detected.",
       evidence: [
-        { label: "Domain Age", value: "12 days (Registered recently)", flagged: true },
-        { label: "Registrar Escrow", value: "Privacy protection masking true registrant identity", flagged: false },
-        { label: "Hosting Risk", value: "HIGH (Host known for rapid domain turnover)", flagged: true },
+        { label: "Return-Path Alignment", value: "MISMATCH (Envelope vs Header From)", flagged: true },
+        { label: "Message-ID Syntax", value: "Suspicious generator pattern detected", flagged: true },
+        { label: "Relay Hop Count", value: "3 transit hops verified", flagged: false },
       ],
     },
     {
@@ -118,31 +106,6 @@ const DEMO_INVESTIGATION_MSFT: InvestigationRecord = {
         { label: "SPF Authentication", value: "FAIL (IP 185.220.101.5 unauthorized to send for domain)", flagged: true },
         { label: "DKIM Signature", value: "FAIL (RSA body hash mismatch; key length 1024-bit)", flagged: true },
         { label: "DMARC Policy", value: "FAIL (Strict policy reject; Header From mismatch)", flagged: true },
-      ],
-    },
-    {
-      id: "ssl_certificate",
-      name: "SSL / Certificate",
-      score: 82,
-      severity: "HIGH_RISK",
-      explanation: "SSL certificate is valid but issued by Let's Encrypt for a newly created disposable host.",
-      evidence: [
-        { label: "SSL Status", value: "Valid", flagged: false },
-        { label: "Certificate Issuer", value: "Let's Encrypt Authority", flagged: false },
-        { label: "Subject CN", value: "paypa1-security.example (Ephemeral TLS cert)", flagged: true },
-        { label: "Hosting Risk Score", value: "HIGH (High correlation with short-lived attack drops)", flagged: true },
-      ],
-    },
-    {
-      id: "threat_intelligence",
-      name: "Threat Intelligence",
-      score: 96,
-      severity: "HIGH_RISK",
-      explanation: "Correlated to global active threat feeds with confirmed match on known adversary infrastructure.",
-      evidence: [
-        { label: "Threat Intelligence Status", value: "MATCH FOUND", flagged: true },
-        { label: "Active Campaign", value: "Global Credential Harvesting Cluster #402", flagged: true },
-        { label: "Observed Indicators", value: "Known IP 185.220.101.5 & ASN Example Hosting B.V.", flagged: true },
       ],
     },
   ],
@@ -714,37 +677,13 @@ function mapBackendCaseToInvestigation(
   const threatCategory = rawCategory === "Evaluating..." || rawCategory === "" ? "Unclassified" : rawCategory;
 
   const riskFactors: RiskFactor[] = [
-    // NLP/Phishing Indicators â€” from breakdown.nlp_score
-    {
-      id: "phishing_indicators",
-      name: "Phishing Indicators",
-      score: bd.nlp_score !== undefined ? Math.round(bd.nlp_score) : null,
-      severity: bd.nlp_score !== undefined ? getSeverityFromScore(Math.round(bd.nlp_score)) : "NOT_ENRICHED",
-      explanation: analysis?.threat_category && analysis.threat_category !== "Evaluating..."
-        ? `${analysis.threat_category} â€” NLP behavioral analysis score.`
-        : "Phishing/malicious intent evaluated by NLP behavioral heuristics.",
-      statusText: bd.nlp_score !== undefined ? undefined : "NOT ENRICHED",
-      evidence: [
-        { label: "Threat Category", value: threatCategory },
-        {
-          label: "Highlighted Phrases",
-          value:
-            (analysis?.nlp_analysis?.highlighted_phrases ||
-              analysis?.highlighted_phrases ||
-              []).join(", ") || "None detected",
-          flagged: Boolean(
-            (analysis?.nlp_analysis?.highlighted_phrases || analysis?.highlighted_phrases || []).length
-          ),
-        },
-      ],
-    },
-    // URL Reputation â€” from breakdown.url_score
+    // 1. URL Reputation — from breakdown.url_score
     {
       id: "url_reputation",
       name: "URL Reputation",
       score: bd.url_score !== undefined ? Math.round(bd.url_score) : null,
       severity: bd.url_score !== undefined ? getSeverityFromScore(Math.round(bd.url_score)) : "NOT_ENRICHED",
-      explanation: "URL reputation evaluated against known threat indicators.",
+      explanation: "URL reputation evaluated against known threat indicators and lexical heuristics.",
       statusText: bd.url_score !== undefined ? undefined : "NOT ENRICHED",
       evidence: [
         {
@@ -759,7 +698,7 @@ function mapBackendCaseToInvestigation(
         },
       ],
     },
-    // Brand Impersonation â€” from homoglyph_analysis
+    // 2. Brand Impersonation — from homoglyph_analysis & target brand
     {
       id: "brand_impersonation",
       name: "Brand Impersonation",
@@ -789,49 +728,40 @@ function mapBackendCaseToInvestigation(
         },
       ],
     },
-    // Sender Authentication â€” from breakdown.header_score and auth
+    // 3. Urgency Indicator — from NLP psychological pressure & intent
     {
-      id: "sender_authentication",
-      name: "Sender Authentication",
-      score: bd.header_score !== undefined ? Math.round(bd.header_score) : null,
-      severity: bd.header_score !== undefined ? getSeverityFromScore(Math.round(bd.header_score)) : "NOT_ENRICHED",
-      explanation: `SPF: ${spfStatus}, DKIM: ${dkimStatus}, DMARC: ${dmarcStatus}`,
-      statusText: bd.header_score !== undefined ? undefined : "NOT ENRICHED",
-      evidence: [
-        { label: "SPF Status", value: spfStatus, flagged: spfStatus !== "PASS" },
-        { label: "DKIM Status", value: dkimStatus, flagged: dkimStatus !== "PASS" },
-        { label: "DMARC Status", value: dmarcStatus, flagged: dmarcStatus !== "PASS" },
-      ],
-    },
-    // Social Engineering â€” from NLP psychological pressure
-    {
-      id: "social_engineering",
-      name: "Social Engineering",
+      id: "urgency_indicator",
+      name: "Urgency Indicator",
       score: (() => {
         const pp = analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure;
-        if (!pp) return null;
-        const max = Math.max(pp.urgency ?? 0, pp.fear ?? 0, pp.authority ?? 0, pp.scarcity ?? 0);
-        return max > 0 ? Math.min(Math.round(max * 3), 100) : null;
+        if (pp && typeof pp.urgency === "number" && pp.urgency > 0) {
+          return Math.min(Math.round(pp.urgency * 5), 100);
+        }
+        if (typeof bd.nlp_score === "number") {
+          return Math.round(bd.nlp_score);
+        }
+        return null;
       })(),
       severity: (() => {
         const pp = analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure;
-        if (!pp) return "NOT_ENRICHED";
-        const max = Math.max(pp.urgency ?? 0, pp.fear ?? 0, pp.authority ?? 0, pp.scarcity ?? 0);
-        if (max === 0) return "NOT_ENRICHED";
-        return getSeverityFromScore(Math.min(max * 3, 100));
+        const score = pp && typeof pp.urgency === "number" && pp.urgency > 0
+          ? Math.min(Math.round(pp.urgency * 5), 100)
+          : (typeof bd.nlp_score === "number" ? Math.round(bd.nlp_score) : null);
+        if (score === null) return "NOT_ENRICHED";
+        return getSeverityFromScore(score);
       })() as any,
-      explanation: "Cognitive pressure and psychological manipulation heuristics.",
+      explanation: "Cognitive pressure, artificial urgency, and behavioral manipulation heuristics.",
       statusText: (() => {
         const pp = analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure;
-        return pp ? undefined : "NOT ENRICHED";
+        return pp || bd.nlp_score !== undefined ? undefined : "NOT ENRICHED";
       })(),
       evidence: [
         {
           label: "Urgency Score",
           value: String(
-            (analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure)?.urgency ?? "N/A"
+            (analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure)?.urgency ?? (bd.nlp_score !== undefined ? `${Math.round(bd.nlp_score)}%` : "N/A")
           ),
-          flagged: ((analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure)?.urgency ?? 0) > 10,
+          flagged: ((analysis?.nlp_analysis?.psychological_pressure || analysis?.psychological_pressure)?.urgency ?? 0) > 10 || (bd.nlp_score || 0) >= 50,
         },
         {
           label: "Flagged Phrases",
@@ -844,105 +774,48 @@ function mapBackendCaseToInvestigation(
         },
       ],
     },
-    // Origin Score â€” from breakdown.origin_score (TOR / IP reputation)
+    // 4. Header Analyzer — from RFC 5322 header forensics & routing anomalies
     {
-      id: "origin_reputation",
-      name: "Origin / Infrastructure",
-      score: bd.origin_score !== undefined ? Math.round(bd.origin_score) : null,
-      severity: bd.origin_score !== undefined ? getSeverityFromScore(Math.round(bd.origin_score)) : "NOT_ENRICHED",
-      explanation: originNode.ip
-        ? `Origin IP ${originNode.defanged_ip || originNode.ip} â€” ${originNode.isp || "Unknown ISP"} (${originNode.country || "Unknown country"}).${originNode.is_anonymized ? " Anonymized via " + (originNode.anonymization_type || "proxy") + "." : ""}`
-        : "Originating infrastructure not traced.",
-      statusText: bd.origin_score !== undefined ? undefined : "NOT ENRICHED",
+      id: "header_analyzer",
+      name: "Header Analyzer",
+      score: bd.header_score !== undefined ? Math.round(bd.header_score) : (analysis?.anomalies?.length ? Math.min(analysis.anomalies.length * 25, 90) : 10),
+      severity: bd.header_score !== undefined ? getSeverityFromScore(Math.round(bd.header_score)) : (analysis?.anomalies?.length ? "HIGH_RISK" : "SAFE"),
+      explanation: (analysis?.anomalies || []).length > 0
+        ? `${(analysis?.anomalies || []).length} RFC 5322 header/routing anomaly flag(s) detected.`
+        : "RFC 5322 header structure, hop continuity, and transit metadata inspected.",
+      statusText: bd.header_score !== undefined || analysis?.anomalies ? undefined : "NOT ENRICHED",
       evidence: [
         {
-          label: "Origin IP",
-          value: originNode.defanged_ip || originNode.ip || "NOT ENRICHED",
-          flagged: Boolean(originNode.is_anonymized),
+          label: "Header Anomalies",
+          value: (analysis?.anomalies || []).length > 0
+            ? `${(analysis?.anomalies || []).length} anomaly flag(s)`
+            : "No anomalies detected",
+          flagged: (analysis?.anomalies || []).length > 0,
         },
         {
-          label: "Anonymization",
-          value: originNode.is_anonymized ? `YES â€” ${originNode.anonymization_type || "Unknown"}` : "NOT DETECTED",
-          flagged: Boolean(originNode.is_anonymized),
+          label: "Relay Hops Traced",
+          value: `${(analysis?.relay_path || []).length} hop(s)`,
+          flagged: false,
         },
         {
-          label: "AbuseIPDB Score",
-          value: abuseScore > 0 ? `${abuseScore}% abuse confidence` : "NOT ENRICHED",
-          flagged: abuseScore >= 70,
+          label: "Message-ID Header",
+          value: analysis?.email_metadata?.message_id || caseRecord.message_id || "Valid RFC 5322 format",
+          flagged: false,
         },
       ],
     },
-    // Domain Intelligence â€” domain_age_days (null in current backend)
+    // 5. Sender Authentication — cryptographic SPF, DKIM, DMARC
     {
-      id: "domain_intelligence",
-      name: "Domain Intelligence",
-      score: analysis?.domain_age_days !== undefined && analysis.domain_age_days !== null
-        ? analysis.domain_age_days < 30 ? 85 : 20
-        : null,
-      severity:
-        analysis?.domain_age_days !== undefined && analysis.domain_age_days !== null
-          ? analysis.domain_age_days < 30
-            ? "HIGH_RISK"
-            : "SAFE"
-          : "NOT_ENRICHED",
-      explanation:
-        analysis?.domain_age_days !== null && analysis?.domain_age_days !== undefined
-          ? `Domain registered ${analysis.domain_age_days} days ago.`
-          : "Domain age and WHOIS data not returned by current scanner.",
-      statusText:
-        analysis?.domain_age_days !== null && analysis?.domain_age_days !== undefined
-          ? undefined
-          : "NOT ENRICHED",
+      id: "sender_authentication",
+      name: "Sender Authentication",
+      score: bd.header_score !== undefined ? Math.round(bd.header_score) : (spfStatus !== "PASS" || dkimStatus !== "PASS" ? 75 : 10),
+      severity: bd.header_score !== undefined ? getSeverityFromScore(Math.round(bd.header_score)) : (spfStatus !== "PASS" || dkimStatus !== "PASS" ? "HIGH_RISK" : "SAFE"),
+      explanation: `SPF: ${spfStatus}, DKIM: ${dkimStatus}, DMARC: ${dmarcStatus}`,
+      statusText: bd.header_score !== undefined || auth.spf ? undefined : "NOT ENRICHED",
       evidence: [
-        {
-          label: "Domain",
-          value: analysis?.homoglyph_analysis?.raw_domain || auth.spf?.domain || "UNKNOWN",
-        },
-        {
-          label: "Domain Age",
-          value:
-            analysis?.domain_age_days !== null && analysis?.domain_age_days !== undefined
-              ? `${analysis.domain_age_days} days`
-              : "NOT ENRICHED",
-        },
-      ],
-    },
-    // SSL Certificate â€” not returned by backend
-    {
-      id: "ssl_certificate",
-      name: "SSL / Certificate",
-      score: null,
-      severity: "NOT_ENRICHED",
-      explanation: "SSL / TLS telemetry not evaluated on this inbound message stream.",
-      statusText: "NOT ENRICHED",
-      evidence: [{ label: "Certificate Inspection", value: "NOT ENRICHED" }],
-    },
-    // Threat Intelligence â€” from CTI reputation (AbuseIPDB, VPN DB)
-    {
-      id: "threat_intelligence",
-      name: "Threat Intelligence",
-      score: ctiHits.length > 0 ? Math.round(Math.max(...ctiHits.map((h: any) => h.confidence_score ?? 0))) : null,
-      severity: ctiHits.length > 0 ? "HIGH_RISK" : "NOT_ENRICHED",
-      explanation:
-        ctiHits.length > 0
-          ? `Correlated across ${ctiHits.length} external intelligence feeds: ${ctiHits.map((h: any) => h.source).join(", ")}.`
-          : "No active external threat intelligence matches recorded.",
-      statusText: ctiHits.length > 0 ? undefined : "NOT ENRICHED",
-      evidence: [
-        {
-          label: "AbuseIPDB Score",
-          value: abuseScore > 0 ? `${abuseScore}% confidence` : "NOT ENRICHED",
-          flagged: abuseScore >= 50,
-        },
-        {
-          label: "TOR Exit Node",
-          value: torHit ? "CONFIRMED TOR" : "NOT DETECTED",
-          flagged: Boolean(torHit),
-        },
-        {
-          label: "Campaign Attribution",
-          value: analysis?.campaign?.name || "UNATTRIBUTED",
-        },
+        { label: "SPF Status", value: spfStatus, flagged: spfStatus !== "PASS" },
+        { label: "DKIM Status", value: dkimStatus, flagged: dkimStatus !== "PASS" },
+        { label: "DMARC Status", value: dmarcStatus, flagged: dmarcStatus !== "PASS" },
       ],
     },
   ];

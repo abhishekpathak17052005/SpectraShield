@@ -59,9 +59,10 @@
         if (activeEmailCard) activeEmailCard.classList.remove('hidden');
 
         chrome.tabs.sendMessage(activeTab.id, { type: 'EXTRACT_ACTIVE_EMAIL' }, function (res) {
-          if (chrome.runtime.lastError || !res || !res.ok || !res.payload) {
-            if (activeEmailSubject) activeEmailSubject.textContent = 'Open an email thread in Gmail to inspect.';
-            if (activeEmailSender) activeEmailSender.textContent = 'No active email message open in DOM.';
+          var err = chrome.runtime.lastError;
+          if (err || !res || !res.ok || !res.payload) {
+            if (activeEmailSubject) activeEmailSubject.textContent = 'Please refresh this tab (F5) to connect SpectraShield.';
+            if (activeEmailSender) activeEmailSender.textContent = (err && err.message) ? err.message : 'No open email found in DOM.';
             if (scanActiveEmailBtn) scanActiveEmailBtn.disabled = true;
             return;
           }
@@ -86,29 +87,44 @@
   if (scanActiveEmailBtn) {
     scanActiveEmailBtn.addEventListener('click', function () {
       if (!activeTabExtractedPayload) {
-        showErr('Unable to read the current email.');
+        showErr('Unable to read the current email. Please ensure an email is open in Gmail.');
         return;
       }
       scanActiveEmailBtn.disabled = true;
-      const originalText = scanActiveEmailBtn.innerHTML;
-      scanActiveEmailBtn.innerHTML = '<span class="btn-text">⏳ Scanning DOM & Opening Mail Intelligence...</span>';
+      scanActiveEmailBtn.innerHTML = '<span class="btn-text">✓ Opening Mail Intelligence...</span>';
 
-      chrome.runtime.sendMessage({
-        type: 'SPECTRASHIELD_ANALYZE_EMAIL',
-        payload: activeTabExtractedPayload,
-        openDashboard: true
-      }, function (res) {
-        if (!res || !res.ok) {
-          scanActiveEmailBtn.disabled = false;
-          scanActiveEmailBtn.innerHTML = originalText;
-          showErr(res && res.error ? res.error : 'SpectraShield backend unavailable.');
-          return;
+      // 1. Instant Redirect (0ms latency): open or focus the frontend tab immediately
+      openSocConsole();
+
+      // 2. Concurrently run analysis in background
+      fetch(`${API_BASE}/api/forensics/analyze-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(activeTabExtractedPayload),
+      })
+      .then(function (res) {
+        if (!res.ok) throw new Error(`Backend error: ${res.status}`);
+        return res.json();
+      })
+      .then(function (data) {
+        const caseId = data.case_id;
+        if (caseId) {
+          latestCaseId = caseId;
+          try {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({
+                type: 'OPEN_MAIL_INVESTIGATION',
+                caseId: caseId,
+                url: `${SOC_URL}/mail-intelligence/${encodeURIComponent(caseId)}`
+              });
+            }
+          } catch (_) {}
         }
-        scanActiveEmailBtn.innerHTML = '<span class="btn-text">✓ Sealed: ' + (res.data?.case_number || 'CASE-2026') + ' (Opened)</span>';
-        if (res.data) showResult(res.data);
-        setTimeout(function () {
-          window.close();
-        }, 800);
+        scanActiveEmailBtn.innerHTML = '<span class="btn-text">✓ Case Sealed: ' + (data.case_number || 'CASE-2026') + '</span>';
+        showResult(data);
+      })
+      .catch(function (err) {
+        console.warn('Background scan completed or tab handled by frontend', err);
       });
     });
   }
@@ -171,27 +187,53 @@
       targetUrl = `${SOC_URL}/mail-intelligence?analyzing=true` +
         `&subject=${encodeURIComponent(activeTabExtractedPayload.subject || '')}` +
         `&sender_email=${encodeURIComponent(activeTabExtractedPayload.sender?.email || '')}` +
-        `&raw=${encodeURIComponent((activeTabExtractedPayload.body || activeTabExtractedPayload.subject || '').slice(0, 500))}`;
+        `&platform=${encodeURIComponent(activeTabExtractedPayload.platform || 'gmail')}` +
+        `&raw=${encodeURIComponent((activeTabExtractedPayload.body || activeTabExtractedPayload.subject || '').slice(0, 1000))}`;
     } else {
-      const text = customText || emailText.value || '';
+      const text = customText || (emailText ? emailText.value : '') || '';
       if (text) {
-        targetUrl = `${SOC_URL}/mail-intelligence?analyzing=true&raw=${encodeURIComponent(text.slice(0, 500))}`;
+        targetUrl = `${SOC_URL}/mail-intelligence?analyzing=true&raw=${encodeURIComponent(text.slice(0, 1000))}`;
       }
     }
 
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-      chrome.tabs.create({ url: targetUrl });
-    } else {
+    if (openSocNavBtn) openSocNavBtn.href = targetUrl;
+    if (openSocBtn) openSocBtn.href = targetUrl;
+
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({ type: 'OPEN_MAIL_INVESTIGATION', url: targetUrl }, function (res) {
+          var err = chrome.runtime.lastError;
+          if (err || !res || !res.ok) {
+            if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+              chrome.tabs.create({ url: targetUrl, active: true });
+            } else {
+              window.open(targetUrl, '_blank');
+            }
+          }
+        });
+        return;
+      }
+    } catch (_) {}
+
+    try {
       window.open(targetUrl, '_blank');
+    } catch (_) {
+      window.location.href = targetUrl;
     }
   }
 
   if (openSocNavBtn) {
-    openSocNavBtn.addEventListener('click', () => openSocConsole());
+    openSocNavBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openSocConsole();
+    });
   }
 
   if (openSocBtn) {
-    openSocBtn.addEventListener('click', () => openSocConsole());
+    openSocBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openSocConsole();
+    });
   }
 
   if (newScanBtn) {
@@ -220,6 +262,9 @@
   function showResult(data) {
     if (data && data.case_id) {
       latestCaseId = data.case_id;
+      const targetUrl = `${SOC_URL}/mail-intelligence/${encodeURIComponent(data.case_id)}`;
+      if (openSocNavBtn) openSocNavBtn.href = targetUrl;
+      if (openSocBtn) openSocBtn.href = targetUrl;
     }
     formSection.classList.add('hidden');
     result.classList.remove('hidden');
@@ -293,7 +338,7 @@
     result.classList.add('hidden');
   }
 
-  analyzeBtn.addEventListener('click', async () => {
+  analyzeBtn.addEventListener('click', () => {
     const text = (emailText.value || '').trim();
     if (!text) {
       showErr('Please enter email content, subject, or headers to analyze.');
@@ -302,6 +347,11 @@
 
     analyzeBtn.disabled = true;
     error.classList.add('hidden');
+    const originalText = analyzeBtn.innerHTML;
+    analyzeBtn.innerHTML = '<span class="btn-sheen"></span><span class="btn-text">✓ Opening Investigation Workspace...</span>';
+
+    // 1. Instant Redirect (0ms latency): open or focus the frontend workspace immediately
+    openSocConsole(text);
 
     const payload = {
       body: text,
@@ -313,37 +363,37 @@
       private_mode: privateMode.checked,
     };
 
-    try {
-      const res = await fetch(`${API_BASE}/api/forensics/analyze-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+    fetch(`${API_BASE}/api/forensics/analyze-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(`Backend error: ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        const caseId = data.case_id;
+        if (caseId) {
+          latestCaseId = caseId;
+          try {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({
+                type: 'OPEN_MAIL_INVESTIGATION',
+                caseId: caseId,
+                url: `${SOC_URL}/mail-intelligence/${encodeURIComponent(caseId)}`
+              });
+            }
+          } catch (_) {}
+        }
+        showResult(data);
+      })
+      .catch(e => {
+        console.warn('Backend sync in background:', e);
+      })
+      .finally(() => {
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = originalText;
       });
-
-      if (!res.ok) throw new Error(`Backend error: ${res.status}`);
-      const data = await res.json();
-      showResult(data);
-    } catch (e) {
-      // Offline fallback demonstration mode if backend port 8000 is not reachable
-      console.warn('Backend offline. Displaying local evaluation.', e);
-      showResult({
-        final_risk: 88,
-        verdict: 'High Risk / Malicious',
-        confidence_level: 'High (Offline Mode)',
-        threat_category: 'Credential Harvester & BEC',
-        reasoning_summary:
-          'Evaluated in offline sandbox: High urgency cues detected, unverified external login target identified, and potential brand spoofing suspected.',
-        risk_breakdown: { brand_match: 'Microsoft 365' },
-        breakdown: {
-          url_score: 88,
-          manipulation_score: 92,
-          brand_impersonation_score: 85,
-          ai_generated_score: 74,
-          header_score: 80,
-        },
-      });
-    } finally {
-      analyzeBtn.disabled = false;
-    }
   });
 })();

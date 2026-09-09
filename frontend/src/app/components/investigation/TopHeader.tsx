@@ -45,27 +45,20 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         background: "rgba(7, 11, 20, 0.85)",
       }}
     >
-      {/* Left: Context */}
+      {/* Left: Breadcrumbs */}
       <div className="flex items-center gap-3 min-w-0">
-        {/* Investigation ID Pill */}
-        <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs">
-          <span className="text-[10px] uppercase tracking-wider text-cyan-400/70 font-mono font-bold">
-            ID
-          </span>
-          <span className="font-mono font-bold text-cyan-200">{investigationId}</span>
-          <button
-            onClick={handleCopy}
-            className="text-cyan-400 hover:text-white transition-colors ml-0.5"
-            title="Copy Investigation ID"
+        <nav className="flex items-center gap-2 text-xs font-medium text-slate-400 truncate">
+          <span
+            className="hover:text-slate-200 transition-colors cursor-pointer"
+            onClick={onBackToDashboard}
           >
-            {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-          </button>
-        </div>
-
-        {/* Context Label */}
-        <span className="text-xs text-slate-400 hidden lg:inline font-mono">
-          Gmail • Email Analysis
-        </span>
+            SpectraShield
+          </span>
+          <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+          <span className="text-slate-200 font-medium truncate">
+            {investigationId}
+          </span>
+        </nav>
       </div>
 
       {/* Middle/Right: Live System Engine & Search & Actions */}

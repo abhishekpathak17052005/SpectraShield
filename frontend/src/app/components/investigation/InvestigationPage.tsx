@@ -25,9 +25,9 @@ import {
 import { InvestigationRecord } from "../../types/investigation";
 import { getInvestigationById } from "../../services/investigationService";
 import { getExportPdfUrl, updateCaseStatus } from "../../api";
-import { Sidebar, NavItemKey } from "./Sidebar";
-import { TopHeader } from "./TopHeader";
+import { SocLayout } from "../soc/SocLayout";
 import { InvestigationHeader } from "./InvestigationHeader";
+import { DetectionVectorMatrix } from "./DetectionVectorMatrix";
 import { RiskFactorAnalysis } from "./RiskFactorAnalysis";
 import { ThreatAssessment } from "./ThreatAssessment";
 import { AttackTechniques } from "./AttackTechniques";
@@ -59,8 +59,6 @@ export const InvestigationPage: React.FC<Props> = ({
 }) => {
   const currentIdProp = initialId || investigationId || "SS-2026-0912-00421";
   const [activeId, setActiveId] = useState<string>(currentIdProp);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [activeNav, setActiveNav] = useState<NavItemKey>("investigations");
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [loading, setLoading] = useState<boolean>(true);
   const [investigationData, setInvestigationData] = useState<InvestigationRecord | null>(null);
@@ -222,60 +220,44 @@ export const InvestigationPage: React.FC<Props> = ({
   );
 
   return (
-    <div
-      className="w-full min-h-screen flex text-foreground font-sans transition-colors duration-300 antialiased overflow-x-hidden"
-      style={{
-        background: "linear-gradient(135deg, #05070d 0%, #080d1a 50%, #050812 100%)",
-      }}
+    <SocLayout
+      activeNav="investigations"
+      onNavigate={onNavigate || (() => {})}
+      title="Security Investigation"
+      breadcrumbs={[
+        { label: "Investigations", route: "/investigations" },
+        { label: investigationData?.meta?.investigationId || activeId },
+      ]}
+      actions={
+        <div className="flex items-center gap-2">
+          <select
+            value={activeId}
+            onChange={(e) => handleSelectCase(e.target.value)}
+            className="bg-slate-900/80 border border-white/10 text-xs font-mono text-cyan-300 rounded-lg px-2.5 py-1.5 outline-none hidden xl:block cursor-pointer"
+            title="Switch Case"
+          >
+            {!["SS-2026-0912-00421", "INV-2026-9041", "INV-2026-8812", "INV-2026-7734"].includes(activeId) && (
+              <option value={activeId}>Case: {activeId} (Live Vault)</option>
+            )}
+            <option value="SS-2026-0912-00421">Case: SS-2026-0912-00421 (PayPal Phish)</option>
+            <option value="INV-2026-9041">Case: INV-2026-9041 (M365 Phish)</option>
+            <option value="INV-2026-8812">Case: INV-2026-8812 (DHL Malware)</option>
+            <option value="INV-2026-7734">Case: INV-2026-7734 (Internal Memo)</option>
+          </select>
+        </div>
+      }
     >
-      {/* ─── LEFT COLLAPSIBLE SIDEBAR ────────────────────────────────────────── */}
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        activeItem={activeNav}
-        onSelectItem={(item) => {
-          setActiveNav(item);
-          const navMap: Record<NavItemKey, string> = {
-            overview: "/overview",
-            investigations: "/investigations",
-            mail_intelligence: "/mail-intelligence",
-            email_intelligence: "/mail-intelligence",
-            threat_intelligence: "/threat-intelligence",
-            forensics: "/forensic-intelligence",
-            evidence: "/evidence",
-            reports: "/reports",
-            settings: "/settings",
-          };
-          const target = navMap[item];
-          if (target && onNavigate) {
-            onNavigate(target);
-          } else if (item === "overview" && onBackToDashboard) {
-            onBackToDashboard();
-          }
-        }}
-      />
-
-      {/* ─── MAIN WORKSPACE COLUMN ───────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
-        {/* Top Header */}
-        <TopHeader
-          investigationId={activeId}
-          onSelectCaseId={handleSelectCase}
-          onBackToDashboard={onBackToDashboard}
-        />
-
-        {/* Scrollable Main Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto space-y-8">
-          {loading ? (
-            <div className="w-full min-h-[60vh] flex flex-col items-center justify-center gap-4">
-              <div
-                className="w-12 h-12 rounded-full border-2 border-transparent border-t-cyan-400 animate-spin"
-                style={{ borderColor: "rgba(0, 229, 255, 0.15)", borderTopColor: "#00E5FF" }}
-              />
-              <div className="text-xs font-mono text-slate-400 uppercase tracking-widest animate-pulse">
-                Loading Investigation {activeId}…
-              </div>
+      <div className="space-y-8">
+        {loading ? (
+          <div className="w-full min-h-[60vh] flex flex-col items-center justify-center gap-4">
+            <div
+              className="w-12 h-12 rounded-full border-2 border-transparent border-t-cyan-400 animate-spin"
+              style={{ borderColor: "rgba(0, 229, 255, 0.15)", borderTopColor: "#00E5FF" }}
+            />
+            <div className="text-xs font-mono text-slate-400 uppercase tracking-widest animate-pulse">
+              Loading Investigation {activeId}…
             </div>
+          </div>
           ) : errorType === "BACKEND_UNAVAILABLE" ? (
             renderBackendOffline()
           ) : errorType === "NOT_FOUND" ? (
@@ -291,7 +273,10 @@ export const InvestigationPage: React.FC<Props> = ({
                 onExportReport={() => window.open(getExportPdfUrl(activeId, false))}
               />
 
-              {/* 2. THREAT FACTOR BREAKDOWN */}
+              {/* 2. DETECTION VECTOR MATRIX */}
+              <DetectionVectorMatrix record={investigationData} />
+
+              {/* 3. THREAT FACTOR BREAKDOWN */}
               <RiskFactorAnalysis factors={investigationData.riskFactors} />
 
               {/* 3. EMAIL THREAT SUMMARY & AI EXPLANATION */}
@@ -393,9 +378,8 @@ export const InvestigationPage: React.FC<Props> = ({
           ) : (
             renderBackendOffline()
           )}
-        </main>
       </div>
-    </div>
+    </SocLayout>
   );
 };
 

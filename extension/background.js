@@ -22,6 +22,81 @@
     });
   });
 
+  function openOrFocusFrontendTab(targetUrl, callback) {
+    if (typeof chrome === 'undefined' || !chrome.tabs) {
+      if (callback) callback(null);
+      return;
+    }
+
+    try {
+      chrome.tabs.query({ url: ['*://localhost:5173/*', '*://127.0.0.1:5173/*'] }, function (tabs) {
+        if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
+          chrome.tabs.create({ url: targetUrl, active: true }, function (newTab) {
+            if (callback) callback(newTab ? newTab.id : null);
+          });
+        } else {
+          var existingTab = tabs[0];
+          chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, function (updatedTab) {
+            if (chrome.windows && existingTab.windowId) {
+              try {
+                chrome.windows.update(existingTab.windowId, { focused: true });
+              } catch (_) {}
+            }
+            if (callback) callback(existingTab.id);
+          });
+        }
+      });
+    } catch (_) {
+      if (chrome.tabs.create) {
+        chrome.tabs.create({ url: targetUrl, active: true }, function (newTab) {
+          if (callback) callback(newTab ? newTab.id : null);
+        });
+      } else if (callback) {
+        callback(null);
+      }
+    }
+  }
+
+  function openMailInvestigation(caseId, tabPromise) {
+    if (!caseId) return;
+    var targetUrl = DASHBOARD_BASE + '/mail-intelligence/' + encodeURIComponent(caseId);
+    if (tabPromise) {
+      tabPromise.then(function (tabId) {
+        if (tabId && typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.update) {
+          chrome.tabs.update(tabId, { url: targetUrl, active: true }, function (updatedTab) {
+            if (chrome.runtime.lastError || !updatedTab) {
+              openOrFocusFrontendTab(targetUrl);
+            }
+          });
+        } else {
+          openOrFocusFrontendTab(targetUrl);
+        }
+      }).catch(function () {
+        openOrFocusFrontendTab(targetUrl);
+      });
+    } else {
+      openOrFocusFrontendTab(targetUrl);
+    }
+  }
+
+  function createPendingInvestigationTab(subject, senderEmail, platform, rawText) {
+    return new Promise(function (resolve) {
+      try {
+        var pendingUrl = DASHBOARD_BASE + '/mail-intelligence?analyzing=true' +
+          '&subject=' + encodeURIComponent(subject || 'Active Inbound Email') +
+          '&sender_email=' + encodeURIComponent(senderEmail || '') +
+          '&platform=' + encodeURIComponent(platform || 'gmail') +
+          (rawText ? '&raw=' + encodeURIComponent(rawText.slice(0, 500)) : '');
+
+        openOrFocusFrontendTab(pendingUrl, function (tabId) {
+          resolve(tabId);
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  }
+
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (message && message.type === 'SPECTRASHIELD_PING') {
       debugLog('PING_IN', {
@@ -30,6 +105,18 @@
       });
       sendResponse({ ok: true, pong: true, ts: Date.now() });
       return;
+    }
+
+    if (message && message.type === 'OPEN_MAIL_INVESTIGATION') {
+      var caseId = message.caseId || message.case_id;
+      var targetUrl = message.url || (caseId
+        ? DASHBOARD_BASE + '/mail-intelligence/' + encodeURIComponent(caseId)
+        : DASHBOARD_BASE + '/mail-intelligence');
+
+      openOrFocusFrontendTab(targetUrl, function (tabId) {
+        sendResponse({ ok: true, tabId: tabId });
+      });
+      return true;
     }
 
     // ─── EMAIL FORENSIC INTELLIGENCE FLOW ────────────────────────────────────
@@ -42,19 +129,14 @@
         urlCount: Array.isArray(emailPayload.urls) ? emailPayload.urls.length : 0
       });
 
-      var targetTabId = null;
+      var tabPromise = null;
       if (message.openDashboard) {
-        var pendingUrl = DASHBOARD_BASE + '/mail-intelligence?analyzing=true' +
-          '&subject=' + encodeURIComponent(emailPayload.subject || 'Active Inbound Email') +
-          '&sender_email=' + encodeURIComponent((emailPayload.sender && emailPayload.sender.email) || '') +
-          '&platform=' + encodeURIComponent(emailPayload.platform || 'gmail');
-        if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-          chrome.tabs.create({ url: pendingUrl }, function (createdTab) {
-            if (createdTab) {
-              targetTabId = createdTab.id;
-            }
-          });
-        }
+        tabPromise = createPendingInvestigationTab(
+          emailPayload.subject,
+          (emailPayload.sender && emailPayload.sender.email) || '',
+          emailPayload.platform || 'gmail',
+          emailPayload.body || emailPayload.email_text || ''
+        );
       }
 
       fetch(API_BASE + '/api/forensics/analyze-email', {
@@ -74,12 +156,7 @@
         });
 
         if (message.openDashboard && data.case_id) {
-          var targetUrl = DASHBOARD_BASE + '/mail-intelligence/' + encodeURIComponent(data.case_id);
-          if (targetTabId && typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.update) {
-            chrome.tabs.update(targetTabId, { url: targetUrl });
-          } else if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-            chrome.tabs.create({ url: targetUrl });
-          }
+          openMailInvestigation(data.case_id, tabPromise);
         }
 
         sendResponse({ ok: true, data: data, case_id: data.case_id });
@@ -102,7 +179,8 @@
 
           function triggerExtraction(tabId) {
             chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_ACTIVE_EMAIL' }, function (extractRes) {
-              if (chrome.runtime.lastError || !extractRes || !extractRes.ok || !extractRes.payload) {
+              var lastErr = chrome.runtime.lastError;
+              if (lastErr || !extractRes || !extractRes.ok || !extractRes.payload) {
                 sendResponse({
                   ok: false,
                   error: extractRes && extractRes.error ? extractRes.error : 'Could not read email from tab. Please ensure an email is open in Gmail.'
@@ -110,17 +188,14 @@
                 return;
               }
 
-              var targetTabId = null;
+              var tabPromise = null;
               if (message.openDashboard) {
-                var pendingUrl = DASHBOARD_BASE + '/mail-intelligence?analyzing=true' +
-                  '&subject=' + encodeURIComponent(extractRes.payload.subject || 'Active Inbound Email') +
-                  '&sender_email=' + encodeURIComponent((extractRes.payload.sender && extractRes.payload.sender.email) || '') +
-                  '&platform=' + encodeURIComponent(extractRes.payload.platform || 'gmail');
-                if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-                  chrome.tabs.create({ url: pendingUrl }, function (createdTab) {
-                    if (createdTab) targetTabId = createdTab.id;
-                  });
-                }
+                tabPromise = createPendingInvestigationTab(
+                  extractRes.payload.subject,
+                  (extractRes.payload.sender && extractRes.payload.sender.email) || '',
+                  extractRes.payload.platform || 'gmail',
+                  extractRes.payload.body || ''
+                );
               }
 
               // Send to backend pipeline
@@ -135,12 +210,7 @@
               })
               .then(function (analysisData) {
                 if (message.openDashboard && analysisData.case_id) {
-                  var destUrl = DASHBOARD_BASE + '/mail-intelligence/' + encodeURIComponent(analysisData.case_id);
-                  if (targetTabId && typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.update) {
-                    chrome.tabs.update(targetTabId, { url: destUrl });
-                  } else if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-                    chrome.tabs.create({ url: destUrl });
-                  }
+                  openMailInvestigation(analysisData.case_id, tabPromise);
                 }
                 sendResponse({ ok: true, data: analysisData, case_id: analysisData.case_id });
               })

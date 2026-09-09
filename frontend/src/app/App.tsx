@@ -117,31 +117,67 @@ export type SocRouteState =
   | { route: "reports" }
   | { route: "settings" };
 
-export const resolveSocRoute = (pathname: string): SocRouteState => {
+export const resolveSocRoute = (pathInput: string): SocRouteState => {
+  let pathname = pathInput || "";
+  let search = "";
+  try {
+    if (pathname.includes("?")) {
+      const parts = pathname.split("?");
+      pathname = parts[0];
+      search = "?" + parts.slice(1).join("?");
+    } else if (typeof window !== "undefined") {
+      search = window.location.search || "";
+    }
+  } catch (_) {}
+
+  // 1. Check for specific Case IDs in pathname first (e.g. /mail-intelligence/CASE-123)
+  const emailCaseMatch = pathname.match(/^\/(?:email|mail)-(?:intelligence|investigation)\/([^/?#]+)/i);
+  if (emailCaseMatch) {
+    return { route: "email_intelligence", caseId: decodeURIComponent(emailCaseMatch[1]) };
+  }
+
+  const investigationCaseMatch = pathname.match(/^\/(?:investigation|investigations)\/([^/?#]+)/i);
+  if (investigationCaseMatch) {
+    return { route: "investigation", caseId: decodeURIComponent(investigationCaseMatch[1]) };
+  }
+
+  // 2. Check query params for case_id or caseId
+  const queryParams = new URLSearchParams(search);
+  const explicitCaseId = queryParams.get("case_id") || queryParams.get("caseId");
+
+  const clean = pathname.toLowerCase().replace(/\/$/, "");
+
+  if (
+    clean === "/email-intelligence" ||
+    clean === "/mail-intelligence" ||
+    clean === "/email-investigation" ||
+    clean === "/mail-investigation"
+  ) {
+    if (explicitCaseId) {
+      return { route: "email_intelligence", caseId: explicitCaseId };
+    }
+    // Check if this is from extension with analyzing params
+    if (search.includes("analyzing=true") || search.includes("raw=") || search.includes("email_text=") || search.includes("subject=")) {
+      return { route: "email_intelligence" };
+    }
+    return { route: "email_intelligence" };
+  }
+
   if (typeof window !== "undefined") {
     const hash = window.location.hash || "";
-    const search = window.location.search || "";
-    if (hash.includes("spectra") || search.includes("email_text") || hash.includes("email_text") || search.includes("raw=")) {
+    if (hash.includes("spectra") || search.includes("email_text") || search.includes("raw=") || search.includes("analyzing")) {
+      if (explicitCaseId) {
+        return { route: "email_intelligence", caseId: explicitCaseId };
+      }
       return { route: "email_intelligence" };
     }
   }
-  const clean = (pathname || "").toLowerCase().replace(/\/$/, "");
+
   if (clean === "" || clean === "/overview") {
     return { route: "overview" };
   }
   if (clean === "/investigations") {
     return { route: "investigations" };
-  }
-  const match = pathname.match(/^\/investigations\/([^/?#]+)/i);
-  if (match) {
-    return { route: "investigation", caseId: decodeURIComponent(match[1]) };
-  }
-  if (clean === "/email-intelligence" || clean === "/mail-intelligence") {
-    return { route: "email_intelligence" };
-  }
-  const emailMatch = pathname.match(/^\/(?:email|mail)-intelligence\/([^/?#]+)/i);
-  if (emailMatch) {
-    return { route: "email_intelligence", caseId: decodeURIComponent(emailMatch[1]) };
   }
   if (clean === "/threat-intelligence") {
     return { route: "threat_intelligence" };
@@ -158,6 +194,7 @@ export const resolveSocRoute = (pathname: string): SocRouteState => {
   if (clean === "/settings") {
     return { route: "settings" };
   }
+
   return { route: "overview" };
 };
 
@@ -168,7 +205,12 @@ const AppContent = () => {
 
   // SOC Route & Legacy View State
   const [socRoute, setSocRoute] = useState<SocRouteState>(() => {
-    return resolveSocRoute(typeof window !== "undefined" ? window.location.pathname : "/");
+    if (typeof window !== "undefined") {
+      // Include full URL path + search for proper route resolution
+      const fullPath = window.location.pathname + window.location.search;
+      return resolveSocRoute(fullPath);
+    }
+    return resolveSocRoute("/");
   });
   const [legacyView, setLegacyView] = useState<ViewMode | null>(() => {
     if (typeof window !== "undefined") {
@@ -190,7 +232,8 @@ const AppContent = () => {
   useEffect(() => {
     const handlePopState = () => {
       setLegacyView(null);
-      setSocRoute(resolveSocRoute(window.location.pathname));
+      const fullPath = window.location.pathname + window.location.search;
+      setSocRoute(resolveSocRoute(fullPath));
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);

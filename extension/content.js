@@ -393,8 +393,6 @@
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      btn.textContent = '⏳ Scanning DOM & Sealing...';
-      btn.disabled = true;
 
       var data = gatherOpenMailData(null);
       var payload = (data && data.structuredPayload) ? data.structuredPayload : {
@@ -404,19 +402,61 @@
         body: ''
       };
 
-      chrome.runtime.sendMessage({
-        type: 'SPECTRASHIELD_ANALYZE_EMAIL',
-        payload: payload,
-        openDashboard: true
-      }, function (res) {
-        if (res && res.ok && res.case_id) {
-          btn.textContent = '✓ Opened: ' + (res.data?.case_number || 'CASE-2026');
-          btn.style.background = '#059669';
-          btn.style.borderColor = '#10B981';
+      var subjectStr = payload.subject || (subjectEl && subjectEl.textContent) || 'Gmail Incident';
+      var senderStr = (payload.sender && payload.sender.email) || '';
+      var rawText = (payload.body || '').slice(0, 1000);
+      var targetUrl = 'http://localhost:5173/mail-intelligence?analyzing=true' +
+        '&subject=' + encodeURIComponent(subjectStr) +
+        '&sender_email=' + encodeURIComponent(senderStr) +
+        '&platform=' + encodeURIComponent(payload.platform || 'gmail') +
+        (rawText ? '&raw=' + encodeURIComponent(rawText) : '');
+
+      btn.textContent = '⚡ Opening Mail Intelligence...';
+      btn.style.background = '#059669';
+      btn.style.borderColor = '#10B981';
+
+      // 1. Instant Tab Redirect (0ms latency)
+      try {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ type: 'OPEN_MAIL_INVESTIGATION', url: targetUrl }, function (res) {
+            var err = chrome.runtime.lastError;
+            if (err || !res || !res.ok) {
+              window.open(targetUrl, '_blank');
+            }
+          });
         } else {
-          btn.textContent = '⚠️ Scan Failed';
-          btn.disabled = false;
+          window.open(targetUrl, '_blank');
         }
+      } catch (_) {
+        window.open(targetUrl, '_blank');
+      }
+
+      // 2. Concurrently run analysis in background
+      fetch(API_BASE + '/api/forensics/analyze-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Status ' + r.status);
+        return r.json();
+      })
+      .then(function (caseData) {
+        btn.textContent = '✓ Opened: ' + (caseData.case_number || 'CASE-2026');
+        if (caseData && caseData.case_id) {
+          try {
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({
+                type: 'OPEN_MAIL_INVESTIGATION',
+                caseId: caseData.case_id,
+                url: 'http://localhost:5173/mail-intelligence/' + encodeURIComponent(caseData.case_id)
+              });
+            }
+          } catch (_) {}
+        }
+      })
+      .catch(function () {
+        btn.disabled = false;
       });
     });
 
@@ -907,21 +947,52 @@
       };
     }
 
-    // 2. Dispatch to background to seal case and open directly in Mail Intelligence
-    chrome.runtime.sendMessage({
-      type: 'SPECTRASHIELD_ANALYZE_EMAIL',
-      payload: payload,
-      openDashboard: true
-    }, function (res) {
-      if (chrome.runtime.lastError) {
-        // Fallback only when background extension worker is unreachable:
-        var pendingUrl = 'http://localhost:5173/mail-intelligence?analyzing=true' +
-          '&subject=' + encodeURIComponent(payload.subject || '') +
-          '&sender_email=' + encodeURIComponent((payload.sender && payload.sender.email) || '') +
-          '&raw=' + encodeURIComponent((payload.body || payload.subject || '').slice(0, 500));
-        window.open(pendingUrl, '_blank');
+    var subjectStr = payload.subject || 'Gmail Security Triage';
+    var senderStr = (payload.sender && payload.sender.email) || '';
+    var rawText = (payload.body || payload.subject || '').slice(0, 1000);
+    var targetUrl = 'http://localhost:5173/mail-intelligence?analyzing=true' +
+      '&subject=' + encodeURIComponent(subjectStr) +
+      '&sender_email=' + encodeURIComponent(senderStr) +
+      '&platform=' + encodeURIComponent(payload.platform || 'gmail') +
+      (rawText ? '&raw=' + encodeURIComponent(rawText) : '');
+
+    // 1. Instant Redirect (0ms latency): open or focus tab right away
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({ type: 'OPEN_MAIL_INVESTIGATION', url: targetUrl }, function (res) {
+          var err = chrome.runtime.lastError;
+          if (err || !res || !res.ok) {
+            window.open(targetUrl, '_blank');
+          }
+        });
+      } else {
+        window.open(targetUrl, '_blank');
       }
-    });
+    } catch (_) {
+      window.open(targetUrl, '_blank');
+    }
+
+    // 2. Concurrently run analysis in background
+    fetch(API_BASE + '/api/forensics/analyze-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (caseData) {
+      if (caseData && caseData.case_id) {
+        try {
+          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({
+              type: 'OPEN_MAIL_INVESTIGATION',
+              caseId: caseData.case_id,
+              url: 'http://localhost:5173/mail-intelligence/' + encodeURIComponent(caseData.case_id)
+            });
+          }
+        } catch (_) {}
+      }
+    })
+    .catch(function () {});
   }
 
   function getBadgeIcon(level) {
@@ -1732,15 +1803,63 @@
     if (msg && msg.type === 'EXTRACT_ACTIVE_EMAIL') {
       try {
         var mailData = gatherOpenMailData(null);
-        if (!mailData || (!mailData.subject && !mailData.bodyText)) {
-          sendResponse({ ok: false, error: 'Unable to read the current email. Ensure an email is open.' });
+        if (mailData && (mailData.bodyText || mailData.urls.length > 0 || (mailData.subject && mailData.subject !== 'Gmail Incident Triage'))) {
+          sendResponse({ ok: true, payload: mailData.structuredPayload });
           return;
         }
-        sendResponse({ ok: true, payload: mailData.structuredPayload });
+
+        // Fallback: Check if an email row is selected in Gmail
+        var selectedRow = document.querySelector('tr.zA[aria-selected="true"], tr.zA.aqw, tr.zA');
+        if (selectedRow) {
+          var subInfo = getSubject(selectedRow);
+          var sndr = getSender(selectedRow);
+          var snip = getSnippet(selectedRow);
+          var urls = getAllUrlsFromRow(selectedRow, subInfo ? subInfo.text : '', snip);
+          if (subInfo && subInfo.text) {
+            sendResponse({
+              ok: true,
+              payload: {
+                platform: 'gmail',
+                subject: subInfo.text,
+                sender: { name: sndr.split('@')[0] || 'Sender', email: sndr || 'unknown@domain.com' },
+                recipient: 'analyst@corp.internal',
+                body: snip || subInfo.text,
+                urls: urls.map(function (u) { return { display_text: u, href: u }; }),
+                timestamp: new Date().toISOString()
+              }
+            });
+            return;
+          }
+        }
+
+        // Fallback: Check LinkedIn
+        var linkedinContainer = document.querySelector('.msg-s-message-list, .msg-s-message-list-content');
+        if (linkedinContainer) {
+          var msgs = linkedinContainer.querySelectorAll('.msg-s-event-listitem__body');
+          var lastMsg = msgs.length ? msgs[msgs.length - 1].textContent.trim() : '';
+          var partnerEl = document.querySelector('.msg-entity-lockup__entity-title, .msg-thread__link-to-profile');
+          var partnerName = partnerEl ? partnerEl.textContent.trim() : 'LinkedIn Contact';
+          if (lastMsg) {
+            sendResponse({
+              ok: true,
+              payload: {
+                platform: 'linkedin',
+                subject: 'LinkedIn Message from ' + partnerName,
+                sender: { name: partnerName, email: 'linkedin-user@messaging.linkedin.com' },
+                recipient: 'analyst@corp.internal',
+                body: lastMsg,
+                urls: extractUrlsFromText(lastMsg).map(function (u) { return { display_text: u, href: u }; }),
+                timestamp: new Date().toISOString()
+              }
+            });
+            return;
+          }
+        }
+
+        sendResponse({ ok: false, error: 'Unable to read email. Please ensure an email thread or conversation is open.' });
       } catch (err) {
         sendResponse({ ok: false, error: 'Extraction error: ' + (err ? err.message : 'Unknown') });
       }
-      return true;
     }
   });
 })();
