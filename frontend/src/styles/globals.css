@@ -1,0 +1,28 @@
+@keyframes flowDash {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animated-threat-edge path,
+.react-flow__edge-path.animated-threat-edge {
+  stroke: #10b981 !important;
+  stroke-dasharray: 6 6 !important;
+  stroke-width: 2px !important;
+  animation: flowDash 1.2s linear infinite !important;
+}
+
+.threat-edge-badge {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-weight: 800 !important;
+  font-size: 9.5px !important;
+  letter-spacing: 0.05em !important;
+  padding: 3px 6px !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4) !important;
+}
