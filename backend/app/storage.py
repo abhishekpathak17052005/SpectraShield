@@ -40,16 +40,19 @@ class EvidenceVault:
             self._seed_initial_cases()
 
     def _load_existing_db_cases(self):
-        """Loads existing cases from DB into memory cache if available."""
+        """Loads existing cases, analyses, and audit logs from DB into memory cache."""
         if forensic_cases_collection is not None:
             try:
                 cursor = forensic_cases_collection.find({})
                 count = 0
                 for doc in cursor:
                     cid = doc.get("id")
+                    cnum = doc.get("case_number")
                     if cid:
                         cases_vault[cid] = doc
                         count += 1
+                    if cnum:
+                        cases_vault[cnum] = doc
                 if count > 0 and audit_ledger_collection is not None:
                     try:
                         for entry in audit_ledger_collection.find({}):
@@ -57,6 +60,23 @@ class EvidenceVault:
                                 audit_ledger.append(entry)
                     except Exception:
                         pass
+            except Exception:
+                pass
+
+        if forensic_analyses_collection is not None:
+            try:
+                cursor = forensic_analyses_collection.find({})
+                for doc in cursor:
+                    doc.pop("_id", None)
+                    aid = doc.get("id")
+                    cid = doc.get("case_id")
+                    cnum = doc.get("case_number")
+                    if aid:
+                        analyses_vault[aid] = doc
+                    if cid:
+                        analyses_vault[cid] = doc
+                    if cnum:
+                        analyses_vault[cnum] = doc
             except Exception:
                 pass
 
@@ -142,7 +162,7 @@ class EvidenceVault:
         return case_record
 
     def store_analysis(self, case_id: str, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Binds full forensic dissection to the case ID."""
+        """Binds full forensic dissection to the case ID and case number."""
         analysis_id = str(uuid.uuid4())
         record = {
             "id": analysis_id,
@@ -151,6 +171,9 @@ class EvidenceVault:
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         analyses_vault[case_id] = record
+        cnum = analysis_data.get("case_number")
+        if cnum:
+            analyses_vault[cnum] = record
 
         # Persist to DB if available
         if forensic_analyses_collection is not None:
@@ -212,6 +235,8 @@ class EvidenceVault:
                 if doc:
                     doc.pop("_id", None)
                     cases_vault[doc.get("id", case_id)] = doc
+                    if doc.get("case_number"):
+                        cases_vault[doc["case_number"]] = doc
                     return doc
             except Exception:
                 pass
@@ -219,15 +244,40 @@ class EvidenceVault:
         return None
 
     def get_analysis(self, case_id: str) -> Optional[Dict[str, Any]]:
+        # 1. Direct hit in memory
         if case_id in analyses_vault:
             return analyses_vault[case_id]
 
+        # 2. Iterate memory vault by case_number, case_id, or id
+        for a in analyses_vault.values():
+            if a.get("case_number") == case_id or a.get("case_id") == case_id or a.get("id") == case_id:
+                return a
+
+        # 3. Resolve parent case to get alternate ID
+        case = self.get_case(case_id)
+        if case:
+            real_id = case.get("id")
+            cnum = case.get("case_number")
+            if real_id and real_id in analyses_vault:
+                return analyses_vault[real_id]
+            if cnum and cnum in analyses_vault:
+                return analyses_vault[cnum]
+
+        # 4. Search DB collection by case_id, case_number, or parent case ID
         if forensic_analyses_collection is not None:
             try:
                 doc = forensic_analyses_collection.find_one({"case_id": case_id})
+                if not doc:
+                    doc = forensic_analyses_collection.find_one({"case_number": case_id})
+                if not doc and case and case.get("id"):
+                    doc = forensic_analyses_collection.find_one({"case_id": case["id"]})
                 if doc:
                     doc.pop("_id", None)
                     analyses_vault[case_id] = doc
+                    if doc.get("case_number"):
+                        analyses_vault[doc["case_number"]] = doc
+                    if doc.get("case_id"):
+                        analyses_vault[doc["case_id"]] = doc
                     return doc
             except Exception:
                 pass
@@ -235,14 +285,24 @@ class EvidenceVault:
         return None
 
     def get_audit_trail(self, case_id: str) -> List[Dict[str, Any]]:
-        entries = [entry for entry in audit_ledger if entry.get("case_id") == case_id]
+        case = self.get_case(case_id)
+        target_ids = {case_id}
+        if case:
+            if case.get("id"):
+                target_ids.add(case["id"])
+            if case.get("case_number"):
+                target_ids.add(case["case_number"])
+
+        entries = [entry for entry in audit_ledger if entry.get("case_id") in target_ids]
         if not entries and audit_ledger_collection is not None:
             try:
-                db_entries = list(audit_ledger_collection.find({"case_id": case_id}))
-                if db_entries:
-                    for e in db_entries:
-                        e.pop("_id", None)
-                    return db_entries
+                for tid in list(target_ids):
+                    db_entries = list(audit_ledger_collection.find({"case_id": tid}))
+                    if db_entries:
+                        for e in db_entries:
+                            e.pop("_id", None)
+                            if e not in entries:
+                                entries.append(e)
             except Exception:
                 pass
         return entries
