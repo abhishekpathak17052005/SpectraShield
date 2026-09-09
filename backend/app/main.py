@@ -985,6 +985,40 @@ def health_check():
         "engine": "active"
     }
 
+
+@app.get("/api/extension/download")
+@app.get("/extension/download")
+def download_extension_bundle():
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+    from fastapi import HTTPException
+
+    extension_dir = Path(__file__).resolve().parent.parent.parent / "extension"
+    if not extension_dir.is_dir():
+        extension_dir = Path(__file__).resolve().parent.parent / "extension"
+
+    if not extension_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Extension folder not found")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_path in extension_dir.rglob("*"):
+            if file_path.is_file() and ".git" not in file_path.parts:
+                arcname = file_path.relative_to(extension_dir)
+                zip_file.write(file_path, arcname)
+
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="spectrashield-extension.zip"',
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
 from app.forensic_routes import forensic_router
 from app.auth_routes import auth_router
 from app.system_routes import system_router
