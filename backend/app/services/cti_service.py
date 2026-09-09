@@ -3,6 +3,7 @@ import re
 import base64
 import logging
 import time
+import asyncio
 from typing import Dict, List, Optional, Any, Tuple
 import httpx
 
@@ -67,7 +68,7 @@ class CyberThreatIntelligenceService:
     def __init__(self):
         self.gsb_api_key = os.getenv("GOOGLE_SAFE_BROWSING_API_KEY", "")
         self.abuseipdb_api_key = os.getenv("ABUSEIPDB_API_KEY", "")
-        self.timeout = 4.0  # short timeout to prevent triage latency
+        self.timeout = 2.0  # low latency timeout to prevent inspection lag
 
     async def check_url_safe_browsing(self, url: str) -> Dict[str, Any]:
         """Queries Google Safe Browsing v4 for malware, phishing, and social engineering."""
@@ -285,23 +286,29 @@ class CyberThreatIntelligenceService:
         origin_ip: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Consolidates intelligence verdicts across all feeds for all extracted links and origin IPs.
+        Consolidates intelligence verdicts across all feeds for all extracted links and origin IPs concurrently.
         """
         records: List[Dict[str, Any]] = []
+        tasks = []
 
         # 1. IP Checks (AbuseIPDB & Commercial VPN)
         if origin_ip:
             vpn_rec = self.check_commercial_vpn(origin_ip)
             records.append(vpn_rec)
-            abuse_rec = await self.check_ip_abuseipdb(origin_ip)
-            records.append(abuse_rec)
+            tasks.append(self.check_ip_abuseipdb(origin_ip))
 
-        # 2. URL Checks (Google Safe Browsing & URLhaus)
+        # 2. URL Checks (Google Safe Browsing & URLhaus concurrently)
         for u in urls[:5]:  # Limit top 5 links to prevent excessive requests
-            gsb_rec = await self.check_url_safe_browsing(u)
-            records.append(gsb_rec)
-            urlhaus_rec = await self.check_urlhaus(u)
-            records.append(urlhaus_rec)
+            tasks.append(self.check_url_safe_browsing(u))
+            tasks.append(self.check_urlhaus(u))
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, dict):
+                    records.append(res)
+                elif isinstance(res, Exception):
+                    logger.debug(f"CTI check task encountered exception: {res}")
 
         return records
 

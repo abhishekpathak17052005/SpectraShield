@@ -309,6 +309,7 @@ export interface EmailIntelligenceRecord {
     is_anonymized?: boolean;
     anonymization_type?: string;
   };
+  relay_path?: Array<any>;
   campaign_id?: string | null;
   created_at: string;
   mode: "LIVE" | "DEMO";

@@ -340,42 +340,62 @@ class URLIntelligenceEngine:
             if not s:
                 return s
             base = s.lower()
-            # remove common suffixes like -support, -login, -verify, -secure, -update
-            base = re.sub(r"[-_\.](support|login|verify|secure|update)$", "", base)
-            return base
+            pattern = r"[-_\.](support|login|verify|secure|security|update|auth|account|signin|portal)$"
+            for _ in range(4):
+                new_base = re.sub(pattern, "", base)
+                if new_base == base:
+                    break
+                base = new_base
+            leet_map = str.maketrans({"0": "o", "1": "l", "3": "e", "5": "s", "4": "a", "8": "b", "@": "a"})
+            return base.translate(leet_map)
 
         norm_sld = _normalize_brand_sld(brand_sld)
         if norm_sld:
             for brand in self.protected_brands:
                 d = _levenshtein(norm_sld, brand)
                 if d <= 2 and norm_sld != brand:
-                    # Aggressive fix: strong brand typosquatting should score at least 90
                     score = max(score, 90.0)
                     brand_flagged = True
                     evidence.append(
                         EvidenceItem(
                             type="brand",
                             label="Brand impersonation",
-                            description="Critical: Brand Impersonation detected via fuzzy matching.",
+                            description=f"Critical: Brand Impersonation detected for '{brand.upper()}' via fuzzy typosquatting.",
                         ).__dict__
                     )
                     break
 
-        # SUBDOMAIN HIJACK DETECTION:
-        # Brand appears anywhere in clean_domain but is not the actual primary domain.
-        if clean_domain and norm_sld:
+        # BRAND & LEETSPEAK SUBSTRING SPOOFING:
+        # Check if normalized domain contains protected brand while not matching genuine domain
+        norm_clean = (clean_domain or "").lower().translate(str.maketrans({"0": "o", "1": "l", "3": "e", "5": "s", "4": "a", "8": "b", "@": "a"}))
+        if clean_domain and not brand_flagged:
             for brand in self.protected_brands:
-                if brand in clean_domain and norm_sld != brand:
-                    score += 75
-                    brand_flagged = True
-                    evidence.append(
-                        EvidenceItem(
-                            type="brand",
-                            label="Subdomain spoofing",
-                            description="Critical: Domain spoofing detected via subdomain manipulation.",
-                        ).__dict__
-                    )
-                    break
+                if brand in norm_clean:
+                    legit = f"{brand}.com"
+                    if not (clean_domain == legit or clean_domain.endswith("." + legit)):
+                        score = max(score, 90.0)
+                        brand_flagged = True
+                        evidence.append(
+                            EvidenceItem(
+                                type="brand",
+                                label="Brand typosquatting / Impersonation",
+                                description=f"Critical: Domain '{clean_domain}' mimics protected brand '{brand.upper()}' without authorization.",
+                            ).__dict__
+                        )
+                        break
+
+        # Credential lure keywords in unverified domain or path
+        if not brand_flagged and score < 50:
+            cred_keywords = ["login", "signin", "verify-account", "password-reset", "secure-account"]
+            if any(ck in raw_lower for ck in cred_keywords):
+                score += 35
+                evidence.append(
+                    EvidenceItem(
+                        type="structural",
+                        label="Credential lure keywords",
+                        description="URL contains credential harvesting keywords (login/signin/verify).",
+                    ).__dict__
+                )
 
         # LAYER 4 — Metadata (high-risk TLD)
         for tld in self.high_risk_tlds:

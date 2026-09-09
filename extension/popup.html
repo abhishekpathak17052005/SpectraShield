@@ -26,9 +26,9 @@
           <span class="brand-badge">v2.0</span>
         </div>
       </div>
-      <button id="openSocNavBtn" class="nav-soc-btn" title="Open Forensic SOC Console">
-        SOC Console ↗
-      </button>
+      <a id="openSocNavBtn" href="http://localhost:5173/mail-intelligence" target="_blank" class="nav-soc-btn" style="text-decoration: none;" title="Open Forensic Mail Intelligence">
+        Mail Investigation ↗
+      </a>
     </header>
 
     <!-- Main Content Body -->
@@ -56,7 +56,7 @@
             Reading sender & headers...
           </div>
           <button type="button" id="scanActiveEmailBtn" class="liquid-btn" style="padding: 8px 12px; font-size: 12px; height: auto; background: linear-gradient(135deg, #0ea5e9, #0284c7); border: 1px solid #38bdf8;">
-            <span class="btn-text">⚡ Scan Email DOM & Open Mail Intelligence</span>
+            <span class="btn-text">⚡ Scan Email DOM & Open Mail Investigation ↗</span>
           </button>
         </div>
 
@@ -91,7 +91,7 @@
 
         <button id="analyzeBtn" class="liquid-btn">
           <span class="btn-sheen"></span>
-          <span class="btn-text">Execute Instant Threat Scan</span>
+          <span class="btn-text">Execute Threat Scan & Investigate ↗</span>
         </button>
       </section>
 
@@ -186,9 +186,9 @@
           <button id="copyDefangedBtn" class="action-btn secondary">
             <span>🛡️ Copy Defanged URL</span>
           </button>
-          <button id="openSocBtn" class="action-btn primary">
-            <span>🔬 Escalate to SOC</span>
-          </button>
+          <a id="openSocBtn" href="http://localhost:5173/mail-intelligence" target="_blank" class="action-btn primary" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">
+            <span>🔬 View Mail Investigation ↗</span>
+          </a>
         </div>
 
         <button id="newScanBtn" class="new-scan-btn">

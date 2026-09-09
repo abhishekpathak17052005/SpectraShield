@@ -57,6 +57,18 @@ HOMOGLYPH_LOOKALIKES = {
 }
 
 
+# Leetspeak mappings commonly used in spoofing (e.g., g00gle, micros0ft)
+LEET_LOOKALIKES = {
+    '0': ('o', 'DIGIT ZERO (LEET O)', 'Leetspeak'),
+    '1': ('l', 'DIGIT ONE (LEET L/I)', 'Leetspeak'),
+    '3': ('e', 'DIGIT THREE (LEET E)', 'Leetspeak'),
+    '4': ('a', 'DIGIT FOUR (LEET A)', 'Leetspeak'),
+    '5': ('s', 'DIGIT FIVE (LEET S)', 'Leetspeak'),
+    '8': ('b', 'DIGIT EIGHT (LEET B)', 'Leetspeak'),
+    '@': ('a', 'AT SIGN (LEET A)', 'Leetspeak'),
+}
+
+
 def _levenshtein_distance(s1: str, s2: str) -> int:
     """Calculates Levenshtein edit distance between two strings."""
     if len(s1) < len(s2):
@@ -90,9 +102,32 @@ def detect_brand_impersonation(text: str, sender_email: str) -> float:
     return min(score, 100.0)
 
 
+def check_brand_impersonation_details(text: str, sender_email: str, sender_name: str = "") -> Dict[str, Any]:
+    """Evaluates if text or display name mimics a known brand while sending from an external domain."""
+    combined = (f"{sender_name} {text}").lower()
+    sender_lower = (sender_email or "").lower()
+    sender_domain = sender_lower.split("@")[-1].rstrip(">").strip() if "@" in sender_lower else sender_lower
+    impersonated = []
+
+    for brand, legit_domain in known_brands.items():
+        if brand in combined:
+            if sender_domain and legit_domain not in sender_domain:
+                impersonated.append({
+                    "brand": brand,
+                    "legit_domain": legit_domain,
+                    "sender_domain": sender_domain
+                })
+
+    return {
+        "is_impersonation": len(impersonated) > 0,
+        "brands": impersonated,
+        "score": 50.0 if impersonated else 0.0
+    }
+
+
 def analyze_homoglyphs(domain_or_email: str) -> Dict[str, Any]:
     """
-    Detects Unicode Cyrillic/Greek homoglyphs and Punycode lookalike domain spoofing (INT-02).
+    Detects Unicode Cyrillic/Greek homoglyphs, Punycode lookalike, and leetspeak domain spoofing (INT-02).
     Returns character-by-character substitution diffs with Unicode hex points and target brand mapping.
     """
     if not domain_or_email:
@@ -157,6 +192,17 @@ def analyze_homoglyphs(domain_or_email: str) -> Dict[str, Any]:
                 "char_name": char_name
             })
             normalized_chars.append(latin_char)
+        elif char in LEET_LOOKALIKES:
+            latin_char, char_name, script = LEET_LOOKALIKES[char]
+            substituted_chars.append({
+                "index": idx,
+                "raw_char": char,
+                "lookalike_char": latin_char,
+                "unicode_hex": f"U+{ord(char):04X}",
+                "script": script,
+                "char_name": char_name
+            })
+            normalized_chars.append(latin_char)
         else:
             normalized_chars.append(char)
 
@@ -168,7 +214,6 @@ def analyze_homoglyphs(domain_or_email: str) -> Dict[str, Any]:
     matched_domain: Optional[str] = None
 
     for brand, legit_domain in known_brands.items():
-        # Check if brand appears in the normalized domain
         if brand in normalized_domain:
             if legit_domain != raw_domain:
                 matched_brand = brand
@@ -178,7 +223,6 @@ def analyze_homoglyphs(domain_or_email: str) -> Dict[str, Any]:
     # If not exact substring, check Levenshtein distance against known brand names
     if not matched_brand:
         domain_stem = normalized_domain.split(".")[0]
-        # Remove hyphens for comparison
         clean_stem = domain_stem.replace("-", "").replace("_", "")
         for brand, legit_domain in known_brands.items():
             if len(brand) >= 4 and _levenshtein_distance(clean_stem, brand) <= 1:
@@ -194,7 +238,7 @@ def analyze_homoglyphs(domain_or_email: str) -> Dict[str, Any]:
         verdict = f"Critical Homoglyph Spoofing ({matched_brand.upper()})"
     elif has_homoglyphs:
         risk_modifier = 35.0
-        verdict = "Suspicious Mixed-Script Homoglyph"
+        verdict = "Suspicious Mixed-Script / Leetspeak Homoglyph"
     elif matched_brand and matched_domain != raw_domain:
         risk_modifier = 25.0
         verdict = f"Typosquatting Brand Lookalike ({matched_brand.upper()})"

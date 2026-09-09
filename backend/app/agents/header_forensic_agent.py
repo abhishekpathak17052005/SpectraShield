@@ -19,6 +19,7 @@ class HeaderForensicAgent:
 
     def __init__(self, dns_timeout: float = 3.0):
         self.resolver = dns.resolver.Resolver()
+        self.resolver.nameservers = ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
         self.resolver.timeout = dns_timeout
         self.resolver.lifetime = dns_timeout
 
@@ -240,6 +241,8 @@ class HeaderForensicAgent:
 
             return {"status": "Neutral", "domain": domain, "sender_ip": origin_ip, "reason": "No explicit directive matched", "record": record}
 
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            return {"status": "None", "domain": domain, "sender_ip": origin_ip, "reason": "No v=spf1 DNS record found", "record": None}
         except Exception as e:
             return {"status": "TempError", "domain": domain, "sender_ip": origin_ip, "reason": f"DNS query failed: {str(e)}", "record": None}
 
@@ -333,6 +336,12 @@ class HeaderForensicAgent:
         if dmarc_pass:
             status = "Pass"
             reason = "DMARC aligned: Pass verified via " + ("SPF & DKIM" if (spf_aligned and dkim_aligned) else ("SPF" if spf_aligned else "DKIM"))
+        elif spf_result.get("status") in ["Fail", "SoftFail"] or dkim_result.get("status") == "Fail":
+            status = "Fail"
+            reason = f"DMARC alignment failed under policy '{policy_str}'. Cryptographic authentication failed."
+        elif spf_result.get("status") in ["Neutral", "None"] and dkim_result.get("status") in ["None", "Neutral"]:
+            status = "Neutral"
+            reason = f"DMARC evaluation inconclusive: RFC 5322 transport headers omitted or absent for From: {from_domain}."
         else:
             status = "Fail"
             reason = f"DMARC alignment failed under policy '{policy_str}'. Neither SPF nor DKIM aligned with From: domain."
@@ -365,12 +374,12 @@ class HeaderForensicAgent:
                 f"Reply-To diversion: Reply-To domain '{reply_to_domain}' directs responses away from From '{from_domain}'."
             )
 
-        if not message_id:
+        if not message_id and raw_received_count > 0:
             anomalies.append("Missing standard Message-ID header (common in automated spam tools).")
-        elif not message_id.startswith("<") or not message_id.endswith(">"):
+        elif message_id and (not message_id.startswith("<") or not message_id.endswith(">")):
             anomalies.append("Syntactically malformed Message-ID (RFC 5322 Section 3.6.4 violation).")
 
-        if raw_received_count == 0:
+        if raw_received_count == 0 and return_path:
             anomalies.append("Zero Received: hops present. Direct client injection suspected.")
 
         return anomalies

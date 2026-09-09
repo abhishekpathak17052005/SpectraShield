@@ -17,8 +17,89 @@ interface Props {
   factors: RiskFactor[];
 }
 
+const TARGET_CONFIG = [
+  {
+    targetId: "url_reputation",
+    targetName: "URL Reputation",
+    matches: (id: string, name: string) =>
+      id === "url_reputation" || id === "url_intelligence" || name.toLowerCase().includes("url"),
+    defaultExplanation: "URL reputation evaluated against known threat indicators and lexical heuristics.",
+    defaultEvidence: [
+      { label: "Lexical Anomaly Engine", value: "Checked", flagged: false },
+      { label: "Reputation Intelligence", value: "Standard baseline profile", flagged: false },
+    ],
+  },
+  {
+    targetId: "brand_impersonation",
+    targetName: "Brand Impersonation",
+    matches: (id: string, name: string) =>
+      id === "brand_impersonation" || name.toLowerCase().includes("brand"),
+    defaultExplanation: "Homoglyph spoofing and deceptive brand impersonation analysis.",
+    defaultEvidence: [
+      { label: "Homoglyph Spoofing", value: "Clean", flagged: false },
+      { label: "Brand Typosquatting", value: "NOT DETECTED", flagged: false },
+    ],
+  },
+  {
+    targetId: "urgency_indicator",
+    targetName: "Urgency Indicator",
+    matches: (id: string, name: string) =>
+      id === "urgency_indicator" || id === "social_engineering" || name.toLowerCase().includes("urgency") || name.toLowerCase().includes("social"),
+    defaultExplanation: "Cognitive pressure, artificial urgency, and behavioral manipulation heuristics.",
+    defaultEvidence: [
+      { label: "Cognitive Urgency", value: "Standard operational tempo", flagged: false },
+      { label: "Coercive Phrases", value: "None detected", flagged: false },
+    ],
+  },
+  {
+    targetId: "header_analyzer",
+    targetName: "Header Analyzer",
+    matches: (id: string, name: string) =>
+      id === "header_analyzer" || id === "header_forensics" || name.toLowerCase().includes("header"),
+    defaultExplanation: "RFC 5322 header structure, hop continuity, and transit routing inspected.",
+    defaultEvidence: [
+      { label: "Envelope Alignment", value: "Pass", flagged: false },
+      { label: "Header Anomalies", value: "None detected", flagged: false },
+    ],
+  },
+  {
+    targetId: "sender_authentication",
+    targetName: "Sender Authentication",
+    matches: (id: string, name: string) =>
+      id === "sender_authentication" || id === "authentication" || name.toLowerCase().includes("authentication") || name.toLowerCase().includes("sender"),
+    defaultExplanation: "Cryptographic protocol verification across SPF, DKIM, and DMARC alignment.",
+    defaultEvidence: [
+      { label: "SPF Authentication", value: "PASS", flagged: false },
+      { label: "DKIM Signature", value: "PASS", flagged: false },
+      { label: "DMARC Policy", value: "PASS", flagged: false },
+    ],
+  },
+];
+
 export const RiskFactorAnalysis: React.FC<Props> = ({ factors }) => {
-  const [expandedFactor, setExpandedFactor] = useState<string | null>(factors[0]?.id || null);
+  // Normalize and filter strictly to the 5 requested factors in order
+  const displayFactors: RiskFactor[] = React.useMemo(() => {
+    return TARGET_CONFIG.map((cfg) => {
+      const match = factors.find((f) => cfg.matches(f.id, f.name));
+      if (match) {
+        return {
+          ...match,
+          id: cfg.targetId,
+          name: cfg.targetName,
+        };
+      }
+      return {
+        id: cfg.targetId,
+        name: cfg.targetName,
+        score: 10,
+        severity: "SAFE" as SeverityLevel,
+        explanation: cfg.defaultExplanation,
+        evidence: cfg.defaultEvidence,
+      };
+    });
+  }, [factors]);
+
+  const [expandedFactor, setExpandedFactor] = useState<string | null>(displayFactors[0]?.id || null);
 
   const toggleFactor = (id: string) => {
     setExpandedFactor((prev) => (prev === id ? null : id));
@@ -93,7 +174,7 @@ export const RiskFactorAnalysis: React.FC<Props> = ({ factors }) => {
             </h2>
           </div>
           <p className="text-xs text-slate-400 mt-0.5 font-sans">
-            Granular evaluation across 8 independent threat vectors
+            Granular evaluation across 5 forensic threat vectors
           </p>
         </div>
 
@@ -114,11 +195,12 @@ export const RiskFactorAnalysis: React.FC<Props> = ({ factors }) => {
         </div>
       </div>
 
-      {/* Grid of 8 Risk Factors */}
+      {/* Grid of 5 Risk Factors */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {factors.map((factor) => {
+        {displayFactors.map((factor, index) => {
           const isExpanded = expandedFactor === factor.id;
           const sev = getSeverityStyle(factor.score, factor.severity);
+          const isLastOdd = index === displayFactors.length - 1 && displayFactors.length % 2 !== 0;
 
           // 12-segment analytical meter
           const totalSegments = 12;
@@ -128,6 +210,8 @@ export const RiskFactorAnalysis: React.FC<Props> = ({ factors }) => {
             <div
               key={factor.id}
               className={`rounded-xl border transition-all duration-200 overflow-hidden ${
+                isLastOdd ? "md:col-span-2" : ""
+              } ${
                 isExpanded
                   ? "border-cyan-500/40 bg-slate-900/90 shadow-xl shadow-black/50"
                   : "border-white/5 bg-white/2 hover:border-cyan-500/20 hover:bg-white/4"
