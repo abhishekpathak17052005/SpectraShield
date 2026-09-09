@@ -8,9 +8,6 @@ venv/
 env/
 **/venv/
 **/.venv/
-backend/.venv/
-backend/venv/
-backend/app/.venv/
 __pycache__/
 **/__pycache__/
 *.py[cod]
@@ -34,6 +31,9 @@ data/quarantine/
 .env.*
 !.env.example
 *.env.local
+backend/.env
+backend/.env.*
+!backend/.env.example
 
 # --- Node.js & Frontend Build Artifacts ---
 node_modules/
@@ -42,6 +42,7 @@ dist/
 **/dist/
 .vite/
 **/.vite/
+package-lock.json
 package-lock.json.bak
 *.tgz
 
@@ -50,24 +51,42 @@ package-lock.json.bak
 Thumbs.db
 .vscode/
 .idea/
+.agents/
 *.swp
 *~
 
-# --- Temporary Files, Diffs & Archives ---
-*.diff
-*.patch
-*.7z
+# --- Archives & Large Binaries ---
 *.zip
+*.7z
 *.tar
 *.tar.gz
+*.rar
 
-# --- Test Outputs & Media Artifacts in Root ---
-/*.pdf
-/*.png
-/*.jpg
-/*.jpeg
-/*.pptx
-/*.ppt
+# --- Test Outputs & Scratch Files ---
+backend/test_*.pdf
+backend/test_*_runner.py
+*.pdf
+!docs/**/*.pdf
+
+# --- Media & Presentation Artifacts ---
+*.png
+*.jpg
+*.jpeg
+*.pptx
+*.ppt
+!frontend/public/**
+!extension/**/*.png
+!docs/**/*.png
+
+# --- Temporary & Patch Files ---
+*.diff
+*.patch
+*.bak
+*.tmp
+
+# --- Legacy / Scratch Docs ---
+clutter.md
+declutter.md
 
 # --- Legacy Backup Directories ---
 prev-frontend/
