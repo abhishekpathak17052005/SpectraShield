@@ -1,18 +1,30 @@
-import * as React from "react";
+import * as React from "react"
+import { cn } from "./utils"
 
-import { cn } from "./utils";
-
-function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
-  return (
-    <textarea
-      data-slot="textarea"
-      className={cn(
-        "resize-none border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content min-h-16 w-full rounded-md border bg-input-background px-3 py-2 text-base transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
-        className,
-      )}
-      {...props}
-    />
-  );
+export interface TextareaProps
+  extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  error?: boolean
+  success?: boolean
+  resizable?: boolean
 }
 
-export { Textarea };
+const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
+  ({ className, error, success, resizable = true, ...props }, ref) => (
+    <textarea
+      className={cn(
+        "flex min-h-[80px] w-full rounded-lg border px-3 py-2 text-sm bg-input-background text-input-text placeholder-input-placeholder transition-colors",
+        "border-input-border hover:border-input-border-hover focus:outline-none focus:border-input-border-focus focus:ring-2 focus:ring-input-border-focus/30",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-surface-muted disabled:text-text-disabled",
+        error && "border-destructive focus:border-destructive focus:ring-destructive/30",
+        success && "border-success focus:border-success focus:ring-success/30",
+        !resizable && "resize-none",
+        className
+      )}
+      ref={ref}
+      {...props}
+    />
+  )
+)
+Textarea.displayName = "Textarea"
+
+export { Textarea }

@@ -1,18 +1,3 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
-@import './tokens.css';
-
-/* Dark map tiles filter for CartoDB Dark Matter emulation */
-.dark-map-tiles {
-  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
-}
-
-/* Ensure smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  overflow-x: hidden;
-}

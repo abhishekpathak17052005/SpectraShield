@@ -39,6 +39,21 @@ class ForensicAnalyzeRequest(BaseModel):
     subject: Optional[str] = None
     private_mode: Optional[bool] = False
     thread_id: Optional[str] = None
+    platform: Optional[str] = "gmail"
+    sender: Optional[Any] = None
+    recipient: Optional[str] = None
+    body: Optional[str] = None
+    urls: Optional[List[Any]] = None
+    timestamp: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class WhyFlaggedReason(BaseModel):
+    category: str
+    explanation: str
+    evidence: str
+    severity: str = "HIGH"
+    contribution: Optional[float] = None
 
 
 class RelayHopSchema(BaseModel):
@@ -225,6 +240,10 @@ class ForensicAnalyzeResponse(BaseModel):
     dkim_verification: Optional[Dict[str, Any]] = None
     transformer_nlp: Optional[Dict[str, Any]] = None
     vip_impersonation: Optional[Dict[str, Any]] = None
+    why_flagged: Optional[List[WhyFlaggedReason]] = []
+    email_metadata: Optional[Dict[str, Any]] = None
+    risk_factors: Optional[Dict[str, Any]] = None
+    url_intelligence_list: Optional[List[Dict[str, Any]]] = None
     created_at: str
 
 

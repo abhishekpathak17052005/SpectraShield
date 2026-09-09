@@ -37,6 +37,82 @@
   const analyzeBtn = document.getElementById('analyzeBtn');
   const loadSampleBtn = document.getElementById('loadSampleBtn');
 
+  // Active Email Card Elements
+  const activeEmailCard = document.getElementById('activeEmailCard');
+  const activeEmailSubject = document.getElementById('activeEmailSubject');
+  const activeEmailSender = document.getElementById('activeEmailSender');
+  const activeEmailPlatform = document.getElementById('activeEmailPlatform');
+  const scanActiveEmailBtn = document.getElementById('scanActiveEmailBtn');
+  let activeTabExtractedPayload = null;
+
+  // Active Tab Automatic Inspection
+  if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      const activeTab = tabs && tabs[0];
+      if (!activeTab || !activeTab.url) return;
+      const tabUrl = activeTab.url.toLowerCase();
+
+      if (tabUrl.includes('mail.google.com') || tabUrl.includes('linkedin.com')) {
+        const isGmail = tabUrl.includes('mail.google.com');
+        if (activeEmailPlatform) activeEmailPlatform.textContent = isGmail ? 'GMAIL' : 'LINKEDIN';
+        if (activeEmailSubject) activeEmailSubject.textContent = 'Detecting active email content...';
+        if (activeEmailCard) activeEmailCard.classList.remove('hidden');
+
+        chrome.tabs.sendMessage(activeTab.id, { type: 'EXTRACT_ACTIVE_EMAIL' }, function (res) {
+          if (chrome.runtime.lastError || !res || !res.ok || !res.payload) {
+            if (activeEmailSubject) activeEmailSubject.textContent = 'Open an email thread in Gmail to inspect.';
+            if (activeEmailSender) activeEmailSender.textContent = 'No active email message open in DOM.';
+            if (scanActiveEmailBtn) scanActiveEmailBtn.disabled = true;
+            return;
+          }
+          activeTabExtractedPayload = res.payload;
+          if (activeEmailSubject) {
+            activeEmailSubject.textContent = res.payload.subject || '(No Subject Email)';
+          }
+          if (activeEmailSender) {
+            const senderName = res.payload.sender?.name || 'Sender';
+            const senderEmail = res.payload.sender?.email || 'unknown';
+            const urlCount = Array.isArray(res.payload.urls) ? res.payload.urls.length : 0;
+            activeEmailSender.textContent = `From: ${senderName} <${senderEmail}> • ${urlCount} link(s)`;
+          }
+          if (scanActiveEmailBtn) {
+            scanActiveEmailBtn.disabled = false;
+          }
+        });
+      }
+    });
+  }
+
+  if (scanActiveEmailBtn) {
+    scanActiveEmailBtn.addEventListener('click', function () {
+      if (!activeTabExtractedPayload) {
+        showErr('Unable to read the current email.');
+        return;
+      }
+      scanActiveEmailBtn.disabled = true;
+      const originalText = scanActiveEmailBtn.innerHTML;
+      scanActiveEmailBtn.innerHTML = '<span class="btn-text">⏳ Scanning DOM & Opening Mail Intelligence...</span>';
+
+      chrome.runtime.sendMessage({
+        type: 'SPECTRASHIELD_ANALYZE_EMAIL',
+        payload: activeTabExtractedPayload,
+        openDashboard: true
+      }, function (res) {
+        if (!res || !res.ok) {
+          scanActiveEmailBtn.disabled = false;
+          scanActiveEmailBtn.innerHTML = originalText;
+          showErr(res && res.error ? res.error : 'SpectraShield backend unavailable.');
+          return;
+        }
+        scanActiveEmailBtn.innerHTML = '<span class="btn-text">✓ Sealed: ' + (res.data?.case_number || 'CASE-2026') + ' (Opened)</span>';
+        if (res.data) showResult(res.data);
+        setTimeout(function () {
+          window.close();
+        }, 800);
+      });
+    });
+  }
+
   // Result Elements
   const result = document.getElementById('result');
   const error = document.getElementById('error');
@@ -85,11 +161,23 @@
     });
   }
 
+  let latestCaseId = null;
+
   function openSocConsole(customText) {
-    const text = customText || emailText.value || '';
-    const targetUrl = text
-      ? `${SOC_URL}/?view=forensics&email_text=${encodeURIComponent(text)}`
-      : SOC_URL;
+    let targetUrl = `${SOC_URL}/mail-intelligence`;
+    if (latestCaseId) {
+      targetUrl = `${SOC_URL}/mail-intelligence/${encodeURIComponent(latestCaseId)}`;
+    } else if (activeTabExtractedPayload) {
+      targetUrl = `${SOC_URL}/mail-intelligence?analyzing=true` +
+        `&subject=${encodeURIComponent(activeTabExtractedPayload.subject || '')}` +
+        `&sender_email=${encodeURIComponent(activeTabExtractedPayload.sender?.email || '')}` +
+        `&raw=${encodeURIComponent((activeTabExtractedPayload.body || activeTabExtractedPayload.subject || '').slice(0, 500))}`;
+    } else {
+      const text = customText || emailText.value || '';
+      if (text) {
+        targetUrl = `${SOC_URL}/mail-intelligence?analyzing=true&raw=${encodeURIComponent(text.slice(0, 500))}`;
+      }
+    }
 
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
       chrome.tabs.create({ url: targetUrl });
@@ -130,6 +218,9 @@
   }
 
   function showResult(data) {
+    if (data && data.case_id) {
+      latestCaseId = data.case_id;
+    }
     formSection.classList.add('hidden');
     result.classList.remove('hidden');
     error.classList.add('hidden');
@@ -213,7 +304,9 @@
     error.classList.add('hidden');
 
     const payload = {
+      body: text,
       email_text: text,
+      subject: text.split('\n')[0].slice(0, 80) || 'Manual Ingestion',
       url: (url.value || '').trim() || undefined,
       urls: (url.value || '').trim() ? [(url.value || '').trim()] : [],
       sender_email: (sender.value || '').trim() || undefined,
@@ -221,7 +314,7 @@
     };
 
     try {
-      const res = await fetch(`${API_BASE}/analyze`, {
+      const res = await fetch(`${API_BASE}/api/forensics/analyze-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

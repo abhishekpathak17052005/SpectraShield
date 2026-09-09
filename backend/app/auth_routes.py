@@ -50,7 +50,8 @@ class RefreshTokenRequest(BaseModel):
 
 
 class RoleSimulationRequest(BaseModel):
-    role: str
+    role: Optional[str] = None
+    simulated_role: Optional[str] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -290,6 +291,7 @@ async def get_me(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Returns the authenticated profile, active role, and permission matrix."""
     return {
         "user": current_user,
+        "role": current_user.get("role"),
         "permissions": ROLE_PERMISSIONS.get(current_user.get("role"), []),
         "is_demo_fallback": current_user.get("is_demo_fallback", False)
     }
@@ -332,7 +334,8 @@ async def simulate_role(req: RoleSimulationRequest):
     Seamless 1-click role simulation for demo, evaluation, and security auditing.
     Switches active identity to one of the 4 enterprise roles instantly.
     """
-    role_upper = req.role.strip().upper()
+    raw_role = req.role or req.simulated_role or ""
+    role_upper = raw_role.strip().upper()
     if role_upper not in VALID_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -375,6 +378,7 @@ async def simulate_role(req: RoleSimulationRequest):
 
     return {
         "status": "SUCCESS",
+        "role": role_upper,
         "simulated_role": role_upper,
         "access_token": access_token,
         "refresh_token": refresh_token,

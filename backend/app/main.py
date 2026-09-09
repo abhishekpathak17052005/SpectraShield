@@ -979,8 +979,11 @@ def health_check():
 
 from app.forensic_routes import forensic_router
 from app.auth_routes import auth_router
+from app.system_routes import system_router
 
 app.include_router(router)
 app.include_router(forensic_router)
 app.include_router(auth_router)
+app.include_router(system_router)
+
 

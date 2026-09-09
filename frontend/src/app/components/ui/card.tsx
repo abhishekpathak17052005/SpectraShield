@@ -1,92 +1,88 @@
-import * as React from "react";
+import * as React from "react"
+import { cn } from "./utils"
 
-import { cn } from "./utils";
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  elevated?: boolean
+  interactive?: boolean
+  noBorder?: boolean
+}
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return (
+const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, elevated = false, interactive = false, noBorder = false, ...props }, ref) => (
     <div
-      data-slot="card"
       className={cn(
-        "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border",
-        className,
+        "rounded-lg bg-surface border transition-all",
+        !noBorder && "border-border",
+        elevated && "bg-surface-elevated border-border shadow-lg",
+        interactive && "hover:shadow-lg hover:border-border-strong cursor-pointer",
+        className
       )}
+      ref={ref}
       {...props}
     />
-  );
-}
+  )
+)
+Card.displayName = "Card"
 
-function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return (
+export interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
+  ({ className, ...props }, ref) => (
     <div
-      data-slot="card-header"
-      className={cn(
-        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 px-6 pt-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
-        className,
-      )}
+      className={cn("flex flex-col space-y-1.5 p-6 border-b border-border", className)}
+      ref={ref}
       {...props}
     />
-  );
-}
+  )
+)
+CardHeader.displayName = "CardHeader"
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <h4
-      data-slot="card-title"
-      className={cn("leading-none", className)}
+export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {}
+
+const CardTitle = React.forwardRef<HTMLHeadingElement, CardTitleProps>(
+  ({ className, ...props }, ref) => (
+    <h2
+      className={cn("text-lg font-semibold text-foreground leading-none tracking-tight", className)}
+      ref={ref}
       {...props}
     />
-  );
-}
+  )
+)
+CardTitle.displayName = "CardTitle"
 
-function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
-  return (
+export interface CardDescriptionProps extends React.HTMLAttributes<HTMLParagraphElement> {}
+
+const CardDescription = React.forwardRef<HTMLParagraphElement, CardDescriptionProps>(
+  ({ className, ...props }, ref) => (
     <p
-      data-slot="card-description"
-      className={cn("text-muted-foreground", className)}
+      className={cn("text-sm text-text-muted", className)}
+      ref={ref}
       {...props}
     />
-  );
-}
+  )
+)
+CardDescription.displayName = "CardDescription"
 
-function CardAction({ className, ...props }: React.ComponentProps<"div">) {
-  return (
+export interface CardContentProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+const CardContent = React.forwardRef<HTMLDivElement, CardContentProps>(
+  ({ className, ...props }, ref) => (
+    <div className={cn("p-6 pt-0", className)} ref={ref} {...props} />
+  )
+)
+CardContent.displayName = "CardContent"
+
+export interface CardFooterProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+const CardFooter = React.forwardRef<HTMLDivElement, CardFooterProps>(
+  ({ className, ...props }, ref) => (
     <div
-      data-slot="card-action"
-      className={cn(
-        "col-start-2 row-span-2 row-start-1 self-start justify-self-end",
-        className,
-      )}
+      className={cn("flex items-center p-6 pt-0", className)}
+      ref={ref}
       {...props}
     />
-  );
-}
+  )
+)
+CardFooter.displayName = "CardFooter"
 
-function CardContent({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="card-content"
-      className={cn("px-6 [&:last-child]:pb-6", className)}
-      {...props}
-    />
-  );
-}
-
-function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="card-footer"
-      className={cn("flex items-center px-6 pb-6 [.border-t]:pt-6", className)}
-      {...props}
-    />
-  );
-}
-
-export {
-  Card,
-  CardHeader,
-  CardFooter,
-  CardTitle,
-  CardAction,
-  CardDescription,
-  CardContent,
-};
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent }

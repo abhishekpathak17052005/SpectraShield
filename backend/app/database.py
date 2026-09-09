@@ -145,6 +145,7 @@ else:
 if is_connected and conn is not None:
 	scans_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="scans",
 		key_column="id",
 		key_field="id",
@@ -152,6 +153,7 @@ if is_connected and conn is not None:
 	)
 	threat_feed_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="threat_feed",
 		key_column="url",
 		key_field="url",
@@ -159,6 +161,7 @@ if is_connected and conn is not None:
 	)
 	vt_cache_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="vt_url_cache",
 		key_column="url",
 		key_field="url",
@@ -166,6 +169,7 @@ if is_connected and conn is not None:
 	)
 	forensic_cases_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="forensic_cases",
 		key_column="id",
 		key_field="id",
@@ -173,6 +177,7 @@ if is_connected and conn is not None:
 	)
 	forensic_analyses_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="forensic_analyses",
 		key_column="id",
 		key_field="id",
@@ -180,6 +185,7 @@ if is_connected and conn is not None:
 	)
 	audit_ledger_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="forensic_audit_ledger",
 		key_column="id",
 		key_field="id",
@@ -187,6 +193,7 @@ if is_connected and conn is not None:
 	)
 	users_collection = PostgresCollection(
 		connection=conn,
+		connection_url=pg_url,
 		table_name="users",
 		key_column="id",
 		key_field="id",
