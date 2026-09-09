@@ -1,45 +1,73 @@
-# Python & Virtual Environments
-venv/
+# ==============================================================================
+# SpectraShield Unified .gitignore
+# ==============================================================================
+
+# --- Python & Virtual Environments ---
 .venv/
-backend/venv/
+venv/
+env/
+**/venv/
+**/.venv/
 backend/.venv/
+backend/venv/
+backend/app/.venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
-backend/app/__pycache__/
-backend/app/services/__pycache__/
-backend/app/utils/__pycache__/
+*.so
+.pytest_cache/
+**/.pytest_cache/
+.coverage
+htmlcov/
 
-# Environment Variables & Secrets
+# --- Database & Runtime Data ---
+*.db
+*.sqlite
+*.sqlite3
+backend/data/quarantine/
+data/quarantine/
+*.log
+
+# --- Environment & Secret Keys ---
 .env
-backend/.env
-frontend/.env
+.env.*
+!.env.example
 *.env.local
 
-# Node.js & Frontend Build Artifacts
+# --- Node.js & Frontend Build Artifacts ---
 node_modules/
-frontend/node_modules/
+**/node_modules/
 dist/
-frontend/dist/
+**/dist/
 .vite/
+**/.vite/
+package-lock.json.bak
+*.tgz
 
-# Operating System & IDE
+# --- Operating System & IDEs ---
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*~
 
-# Additional files
-struct.md
-spec.md
-upgrade-struct.md
-*.pdf
+# --- Temporary Files, Diffs & Archives ---
+*.diff
+*.patch
 *.7z
 *.zip
-backend/data/quarantine/
-data/quarantine/
-upgraded-spec.md 
-phase3.md 
-tools.md 
-new_design.md 
-universal-liquid-glass-design.md
+*.tar
+*.tar.gz
+
+# --- Test Outputs & Media Artifacts in Root ---
+/*.pdf
+/*.png
+/*.jpg
+/*.jpeg
+/*.pptx
+/*.ppt
+
+# --- Legacy Backup Directories ---
+prev-frontend/
