@@ -5,14 +5,14 @@
  * for automatic light/dark mode support.
  */
 
-export { Button, type ButtonProps, buttonVariants } from './Button'
-export { Badge, type BadgeProps, RiskBadge, type RiskBadgeProps, StatusBadge, type StatusBadgeProps, badgeVariants } from './Badge'
-export { Input, type InputProps } from './Input'
-export { Select, type SelectProps } from './Select'
-export { Textarea, type TextareaProps } from './Textarea'
-export { Checkbox, type CheckboxProps } from './Checkbox'
-export { Radio, type RadioProps } from './Radio'
-export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent, type CardProps } from './Card'
-export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption } from './Table'
-export { Dialog, DialogPortal, DialogOverlay, DialogClose, DialogTrigger, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from './Dialog'
+export { Button, type ButtonProps, buttonVariants } from './button'
+export { Badge, type BadgeProps, RiskBadge, type RiskBadgeProps, StatusBadge, type StatusBadgeProps, badgeVariants } from './badge'
+export { Input, type InputProps } from './input'
+export { Select, type SelectProps } from './select'
+export { Textarea, type TextareaProps } from './textarea'
+export { Checkbox, type CheckboxProps } from './checkbox'
+export { Radio, type RadioProps } from './radio'
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent, type CardProps } from './card'
+export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption } from './table'
+export { Dialog, DialogPortal, DialogOverlay, DialogClose, DialogTrigger, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from './dialog'
 

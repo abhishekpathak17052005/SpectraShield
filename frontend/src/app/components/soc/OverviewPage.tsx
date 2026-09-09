@@ -11,10 +11,7 @@ import {
 } from "lucide-react";
 import { getForensicCases, getApiBase, ForensicCaseRecord } from "../../api";
 import { ThreatActivityField } from "./ThreatActivityField";
-import { Card, CardContent } from "../ui/Card";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../ui/Table";
-import { Badge } from "../ui/Badge";
-import { Button } from "../ui/Button";
+import { Card, CardContent, Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Badge, Button } from "../ui";
 
 interface Props {
   onNavigate: (route: string) => void;

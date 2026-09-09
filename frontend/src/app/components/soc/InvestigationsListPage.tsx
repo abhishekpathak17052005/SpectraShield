@@ -7,12 +7,7 @@ import {
   Download,
 } from "lucide-react";
 import { getForensicCases, getExportPdfUrl, ForensicCaseRecord } from "../../api";
-import { Button } from "../ui/Button";
-import { Badge } from "../ui/Badge";
-import { Input } from "../ui/Input";
-import { Select } from "../ui/Select";
-import { Card } from "../ui/Card";
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "../ui/Table";
+import { Button, Badge, Input, Select, Card, Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "../ui";
 
 interface Props {
   onNavigate: (route: string) => void;
