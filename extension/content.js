@@ -7,7 +7,27 @@
 (function () {
   'use strict';
 
-  var API_BASE = 'http://localhost:8000';
+  var API_BASE = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_API_BASE) || 'https://spectrashield-3h3d.onrender.com';
+  var SOC_URL = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_SOC_URL) || 'https://spectrashield-tau.vercel.app';
+
+  function refreshContentEndpoints() {
+    if (typeof getSpectraEndpoints === 'function') {
+      getSpectraEndpoints(function (ep) {
+        if (ep && ep.apiBase) API_BASE = ep.apiBase;
+        if (ep && ep.socUrl) SOC_URL = ep.socUrl;
+      });
+    }
+  }
+  refreshContentEndpoints();
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area === 'local' && (changes.spectra_api_base || changes.spectra_soc_url || changes.spectra_env)) {
+        refreshContentEndpoints();
+      }
+    });
+  }
+
   var BADGE_ATTR = 'data-spectrashield-id';
   var processed = new Set();
   var cache = {};
@@ -405,7 +425,7 @@
       var subjectStr = payload.subject || (subjectEl && subjectEl.textContent) || 'Gmail Incident';
       var senderStr = (payload.sender && payload.sender.email) || '';
       var rawText = (payload.body || '').slice(0, 1000);
-      var targetUrl = 'http://localhost:5173/mail-intelligence?analyzing=true' +
+      var targetUrl = SOC_URL + '/mail-intelligence?analyzing=true' +
         '&subject=' + encodeURIComponent(subjectStr) +
         '&sender_email=' + encodeURIComponent(senderStr) +
         '&platform=' + encodeURIComponent(payload.platform || 'gmail') +
@@ -449,7 +469,7 @@
               chrome.runtime.sendMessage({
                 type: 'OPEN_MAIL_INVESTIGATION',
                 caseId: caseData.case_id,
-                url: 'http://localhost:5173/mail-intelligence/' + encodeURIComponent(caseData.case_id)
+                url: SOC_URL + '/mail-intelligence/' + encodeURIComponent(caseData.case_id)
               });
             }
           } catch (_) {}
@@ -950,7 +970,7 @@
     var subjectStr = payload.subject || 'Gmail Security Triage';
     var senderStr = (payload.sender && payload.sender.email) || '';
     var rawText = (payload.body || payload.subject || '').slice(0, 1000);
-    var targetUrl = 'http://localhost:5173/mail-intelligence?analyzing=true' +
+    var targetUrl = SOC_URL + '/mail-intelligence?analyzing=true' +
       '&subject=' + encodeURIComponent(subjectStr) +
       '&sender_email=' + encodeURIComponent(senderStr) +
       '&platform=' + encodeURIComponent(payload.platform || 'gmail') +
@@ -986,7 +1006,7 @@
             chrome.runtime.sendMessage({
               type: 'OPEN_MAIL_INVESTIGATION',
               caseId: caseData.case_id,
-              url: 'http://localhost:5173/mail-intelligence/' + encodeURIComponent(caseData.case_id)
+              url: SOC_URL + '/mail-intelligence/' + encodeURIComponent(caseData.case_id)
             });
           }
         } catch (_) {}

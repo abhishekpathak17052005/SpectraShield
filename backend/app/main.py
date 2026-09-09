@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
@@ -1012,11 +1012,12 @@ def health_check():
 
 @app.get("/api/extension/download")
 @app.get("/extension/download")
-def download_extension_bundle():
+def download_extension_bundle(request: Request):
     import io
     import zipfile
     from fastapi.responses import StreamingResponse
     from fastapi import HTTPException
+    from urllib.parse import urlparse
 
     extension_dir = Path(__file__).resolve().parent.parent.parent / "extension"
     if not extension_dir.is_dir():
@@ -1025,12 +1026,43 @@ def download_extension_bundle():
     if not extension_dir.is_dir():
         raise HTTPException(status_code=404, detail="Extension folder not found")
 
+    # Detect live API base
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    dynamic_api_base = f"{proto}://{host}".rstrip("/")
+    if "localhost" in host or "127.0.0.1" in host:
+        dynamic_api_base = "http://localhost:8000"
+
+    # Detect live SOC Console URL
+    referer = request.headers.get("referer") or request.headers.get("origin")
+    dynamic_soc_url = "https://spectrashield-tau.vercel.app"
+    if referer:
+        try:
+            parsed_ref = urlparse(referer)
+            if parsed_ref.netloc:
+                dynamic_soc_url = f"{parsed_ref.scheme}://{parsed_ref.netloc}"
+        except Exception:
+            pass
+    elif cors_origins_env:
+        first_cors = cors_origins_env.split(",")[0].strip().rstrip("/")
+        if first_cors and "*" not in first_cors:
+            dynamic_soc_url = first_cors
+
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for file_path in extension_dir.rglob("*"):
             if file_path.is_file() and ".git" not in file_path.parts:
-                arcname = file_path.relative_to(extension_dir)
-                zip_file.write(file_path, arcname)
+                arcname = str(file_path.relative_to(extension_dir)).replace("\\", "/")
+                if arcname == "config.js":
+                    content = file_path.read_text(encoding="utf-8")
+                    content = content.replace(
+                        "https://spectrashield-3h3d.onrender.com", dynamic_api_base
+                    ).replace(
+                        "https://spectrashield-tau.vercel.app", dynamic_soc_url
+                    )
+                    zip_file.writestr(arcname, content.encode("utf-8"))
+                else:
+                    zip_file.write(file_path, arcname)
 
     zip_buffer.seek(0)
     return StreamingResponse(

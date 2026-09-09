@@ -6,27 +6,136 @@
 (function () {
   'use strict';
 
-  const API_BASE = 'http://localhost:8000';
-  const SOC_URL = 'http://localhost:5173';
+  let API_BASE = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_API_BASE) || 'https://spectrashield-3h3d.onrender.com';
+  let SOC_URL = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_SOC_URL) || 'https://spectrashield-tau.vercel.app';
+  let CURRENT_ENV = 'cloud';
+
+  // Environment Settings UI Elements
+  const envIndicatorDot = document.getElementById('envIndicatorDot');
+  const currentEnvLabel = document.getElementById('currentEnvLabel');
+  const toggleEnvSettingsBtn = document.getElementById('toggleEnvSettingsBtn');
+  const envSettingsPanel = document.getElementById('envSettingsPanel');
+  const setEnvCloudBtn = document.getElementById('setEnvCloudBtn');
+  const setEnvLocalBtn = document.getElementById('setEnvLocalBtn');
+  const customSocInput = document.getElementById('customSocInput');
+  const customApiInput = document.getElementById('customApiInput');
+  const saveEnvSettingsBtn = document.getElementById('saveEnvSettingsBtn');
+
+  function updateEnvUI(env, api, soc) {
+    CURRENT_ENV = env || 'cloud';
+    API_BASE = (api || API_BASE).replace(/\/$/, '');
+    SOC_URL = (soc || SOC_URL).replace(/\/$/, '');
+
+    if (currentEnvLabel) {
+      currentEnvLabel.textContent = CURRENT_ENV === 'local' ? 'Localhost (Dev)' : 'Cloud (Vercel)';
+    }
+    if (envIndicatorDot) {
+      envIndicatorDot.style.background = CURRENT_ENV === 'local' ? '#F59E0B' : '#10B981';
+    }
+    if (customSocInput) customSocInput.value = SOC_URL;
+    if (customApiInput) customApiInput.value = API_BASE;
+
+    if (setEnvCloudBtn && setEnvLocalBtn) {
+      if (CURRENT_ENV === 'local') {
+        setEnvLocalBtn.style.background = 'rgba(245, 158, 11, 0.25)';
+        setEnvLocalBtn.style.borderColor = '#F59E0B';
+        setEnvLocalBtn.style.color = '#FBBF24';
+        setEnvCloudBtn.style.background = 'transparent';
+        setEnvCloudBtn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        setEnvCloudBtn.style.color = '#94A3B8';
+      } else {
+        setEnvCloudBtn.style.background = 'rgba(2, 132, 199, 0.25)';
+        setEnvCloudBtn.style.borderColor = '#0284C7';
+        setEnvCloudBtn.style.color = '#38BDF8';
+        setEnvLocalBtn.style.background = 'transparent';
+        setEnvLocalBtn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        setEnvLocalBtn.style.color = '#94A3B8';
+      }
+    }
+
+    const openSocNavBtnEl = document.getElementById('openSocNavBtn');
+    const openSocBtnEl = document.getElementById('openSocBtn');
+    if (openSocNavBtnEl) openSocNavBtnEl.href = `${SOC_URL}/mail-intelligence`;
+    if (openSocBtnEl) openSocBtnEl.href = `${SOC_URL}/mail-intelligence`;
+
+    pingBackend();
+  }
+
+  function saveEnv(env, api, soc) {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({
+        spectra_env: env,
+        spectra_api_base: api,
+        spectra_soc_url: soc
+      }, () => {
+        updateEnvUI(env, api, soc);
+      });
+    } else {
+      updateEnvUI(env, api, soc);
+    }
+  }
+
+  if (toggleEnvSettingsBtn && envSettingsPanel) {
+    toggleEnvSettingsBtn.addEventListener('click', () => {
+      envSettingsPanel.classList.toggle('hidden');
+    });
+  }
+
+  if (setEnvCloudBtn) {
+    setEnvCloudBtn.addEventListener('click', () => {
+      const cloudSoc = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_SOC_URL) || 'https://spectrashield-tau.vercel.app';
+      const cloudApi = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_API_BASE) || 'https://spectrashield-3h3d.onrender.com';
+      if (customSocInput) customSocInput.value = cloudSoc;
+      if (customApiInput) customApiInput.value = cloudApi;
+      saveEnv('cloud', cloudApi, cloudSoc);
+    });
+  }
+
+  if (setEnvLocalBtn) {
+    setEnvLocalBtn.addEventListener('click', () => {
+      const localSoc = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.LOCAL_SOC_URL) || 'http://localhost:5173';
+      const localApi = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.LOCAL_API_BASE) || 'http://localhost:8000';
+      if (customSocInput) customSocInput.value = localSoc;
+      if (customApiInput) customApiInput.value = localApi;
+      saveEnv('local', localApi, localSoc);
+    });
+  }
+
+  if (saveEnvSettingsBtn) {
+    saveEnvSettingsBtn.addEventListener('click', () => {
+      const api = (customApiInput?.value || API_BASE).trim();
+      const soc = (customSocInput?.value || SOC_URL).trim();
+      const env = (api.includes('localhost') || api.includes('127.0.0.1')) ? 'local' : 'cloud';
+      saveEnv(env, api, soc);
+      if (envSettingsPanel) envSettingsPanel.classList.add('hidden');
+    });
+  }
 
   // Live Backend Health Beacon
   async function pingBackend() {
     const beacon = document.getElementById('backendBeacon');
     const statusText = document.getElementById('backendStatusText');
     try {
-      const res = await fetch(`${API_BASE}/`, { method: 'GET' });
-      if (res.ok || res.status === 404) {
+      const res = await fetch(`${API_BASE}/health`, { method: 'GET' });
+      if (res.ok) {
         if (beacon) beacon.className = 'status-indicator live';
-        if (statusText) statusText.textContent = 'Spectra 2.0 Engine Live (Port 8000)';
+        if (statusText) statusText.textContent = CURRENT_ENV === 'local' ? 'Spectra 2.0 Engine Live (Localhost)' : 'Spectra 2.0 Cloud Engine Live';
       } else {
         throw new Error('Non-200');
       }
     } catch {
       if (beacon) beacon.className = 'status-indicator offline';
-      if (statusText) statusText.textContent = 'Spectra 2.0 Air-Gapped / Offline';
+      if (statusText) statusText.textContent = 'Spectra 2.0 Engine Offline / Unreachable';
     }
   }
-  pingBackend();
+
+  if (typeof getSpectraEndpoints === 'function') {
+    getSpectraEndpoints(function (ep) {
+      updateEnvUI(ep.env, ep.apiBase, ep.socUrl);
+    });
+  } else {
+    updateEnvUI('cloud', API_BASE, SOC_URL);
+  }
 
   // Form Elements
   const formSection = document.getElementById('formSection');

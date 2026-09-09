@@ -5,20 +5,26 @@
   "description": "Privacy-first phishing detection with explainable risk scoring. Automatically scans Gmail and shows risk badges.",
   "permissions": [
     "tabs",
-    "activeTab"
+    "activeTab",
+    "storage"
   ],
   "host_permissions": [
     "http://localhost:8000/*",
     "http://localhost:5173/*",
+    "http://127.0.0.1:8000/*",
     "http://127.0.0.1:5173/*",
+    "https://*.onrender.com/*",
+    "https://*.vercel.app/*",
     "https://mail.google.com/*",
-    "https://www.linkedin.com/*",
+    "https://*.google.com/*",
+    "https://*.linkedin.com/*",
     "*://*.linkedin.com/*"
   ],
   "externally_connectable": {
     "matches": [
       "http://localhost:5173/*",
-      "http://127.0.0.1:5173/*"
+      "http://127.0.0.1:5173/*",
+      "https://*.vercel.app/*"
     ]
   },
   "background": {
@@ -35,7 +41,7 @@
         "https://www.linkedin.com/messaging/*",
         "*://*.linkedin.com/*"
       ],
-      "js": ["content.js"],
+      "js": ["config.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_end"
     }

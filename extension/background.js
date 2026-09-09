@@ -1,9 +1,32 @@
+try {
+  importScripts('config.js');
+} catch (_) {}
+
 (function () {
   'use strict';
 
-  var API_BASE = 'http://localhost:8000';
-  var DASHBOARD_BASE = 'http://localhost:5173';
+  var API_BASE = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_API_BASE) || 'https://spectrashield-3h3d.onrender.com';
+  var DASHBOARD_BASE = (typeof SPECTRA_CONFIG !== 'undefined' && SPECTRA_CONFIG.CLOUD_SOC_URL) || 'https://spectrashield-tau.vercel.app';
   var DEBUG_LOGS = true;
+
+  function refreshEndpoints() {
+    if (typeof getSpectraEndpoints === 'function') {
+      getSpectraEndpoints(function (ep) {
+        if (ep && ep.apiBase) API_BASE = ep.apiBase;
+        if (ep && ep.socUrl) DASHBOARD_BASE = ep.socUrl;
+        debugLog('ENDPOINTS_SYNCED', { apiBase: API_BASE, dashboardBase: DASHBOARD_BASE });
+      });
+    }
+  }
+  refreshEndpoints();
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area === 'local' && (changes.spectra_api_base || changes.spectra_soc_url || changes.spectra_env)) {
+        refreshEndpoints();
+      }
+    });
+  }
 
   function debugLog(stage, meta) {
     if (!DEBUG_LOGS) return;
@@ -28,8 +51,16 @@
       return;
     }
 
+    var queryPatterns = ['*://localhost:5173/*', '*://127.0.0.1:5173/*', '*://*.vercel.app/*'];
     try {
-      chrome.tabs.query({ url: ['*://localhost:5173/*', '*://127.0.0.1:5173/*'] }, function (tabs) {
+      if (DASHBOARD_BASE) {
+        var parsed = new URL(DASHBOARD_BASE);
+        queryPatterns.push('*://' + parsed.host + '/*');
+      }
+    } catch (_) {}
+
+    try {
+      chrome.tabs.query({ url: queryPatterns }, function (tabs) {
         if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
           chrome.tabs.create({ url: targetUrl, active: true }, function (newTab) {
             if (callback) callback(newTab ? newTab.id : null);

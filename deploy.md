@@ -98,7 +98,7 @@ Deploy the backend first so you have your live API URL ready for the frontend.
    | `PYTHON_VERSION` | `3.11.9` | Python runtime version |
    | `DB_BACKEND` | `in-memory` *(or `supabase`)* | Database engine mode |
    | `JWT_SECRET` | *(Click "Generate" or random 32-char string)* | Auth tokens encryption |
-   | `CORS_ORIGINS` | `https://spectrashield.vercel.app` | Exact domain of your Vercel frontend |
+   | `CORS_ORIGINS` | `https://spectrashield-tau.vercel.app` | Exact domain of your Vercel frontend |
    | `DATABASE_URL` | *(Optional: Your PostgreSQL URL)* | Persistent case storage |
    | `VT_API_KEY` | *(Optional: VirusTotal API Key)* | Real-time URL reputation |
    | `OPENPHISH_AUTO_SYNC`| `true` | Daily phishing feed sync |
@@ -143,7 +143,7 @@ With the backend URL in hand, deploy the Vite React frontend on Vercel.
 7. Vercel will build and deploy the application in under 60 seconds.
 8. Once complete, you will receive your live domain, for example:
    ```
-   https://spectrashield.vercel.app
+   https://spectrashield-tau.vercel.app
    ```
 
 ### Why SPA Routing Works on Vercel
@@ -164,14 +164,14 @@ This rewrite ensures client-side routes (`/overview`, `/investigations`, `/exten
 
 ## Step 4: Finalize CORS & Domain Security
 
-Once you deploy your frontend and obtain your exact Vercel production domain (e.g., `https://spectrashield.vercel.app`):
+Once you deploy your frontend and obtain your exact Vercel production domain (e.g., `https://spectrashield-tau.vercel.app`):
 
 1. Go back to your **Render Dashboard** > `spectrashield-backend` > **Environment**.
 2. Set the `CORS_ORIGINS` variable to your **exact frontend URL**:
    ```
-   https://spectrashield.vercel.app
+   https://spectrashield-tau.vercel.app
    ```
-   *(If you have multiple domains or custom domains, separate them with commas, e.g. `https://spectrashield.vercel.app,https://yourdomain.com`)*
+   *(If you have multiple domains or custom domains, separate them with commas, e.g. `https://spectrashield-tau.vercel.app,https://yourdomain.com`)*
 
 > [!CAUTION]
 > **Never use wildcard `https://*.vercel.app` in production CORS!**
@@ -184,30 +184,22 @@ Once you deploy your frontend and obtain your exact Vercel production domain (e.
 ## Step 5: Test Your Deployed Application
 
 1. **Dashboard & Workspaces**:
-   - Open `https://spectrashield.vercel.app/overview`.
+   - Open `https://spectrashield-tau.vercel.app/overview`.
    - Verify that the top right indicator shows **Engine Online** with a green status light.
    - Click through **Investigations**, **Threat Intelligence**, and **Settings**. Notice the sidebar stays fixed without reloading.
 
 2. **Browser Extension Download**:
-   - In your live frontend, click **Browser Extension** in the sidebar (or visit `https://spectrashield.vercel.app/extension`).
+   - In your live frontend, click **Browser Extension** in the sidebar (or visit `https://spectrashield-tau.vercel.app/extension`).
    - Click **Download Extension (.zip)**.
    - Verify the download downloads `spectrashield-extension.zip`.
 
 3. **Connecting the Browser Extension to Production**:
-   If users want the unpacked extension to communicate with your live Render backend instead of localhost:
-   - In `extension/manifest.json`, under `host_permissions`, ensure your backend domain is included:
-     ```json
-     "host_permissions": [
-       "https://spectrashield-backend.onrender.com/*",
-       "https://*.vercel.app/*",
-       "https://mail.google.com/*",
-       "https://www.linkedin.com/*"
-     ]
-     ```
-   - In `extension/background.js` and `extension/popup.js`, point the base URL to your Render endpoint:
-     ```javascript
-     const API_BASE = "https://spectrashield-backend.onrender.com";
-     ```
+   - **Automatic (Recommended)**: When you download the extension zip from your live Vercel web console (`/extension`), the backend automatically packages it with your production Render API and Vercel URLs pre-configured.
+   - **Interactive Switcher in Extension Popup**:
+     - Click the SpectraShield icon in your browser toolbar.
+     - Look at the top bar under the header: it displays **Target: Cloud (Vercel)** or **Target: Localhost (Dev)**.
+     - Click **⚙️ Config** to switch between `☁️ Cloud` and `💻 Localhost`, or enter your custom Vercel domain. Click **Save**.
+     - All Gmail badge clicks, LinkedIn triage buttons, and manual scans will immediately redirect to your live Vercel web console!
 
 ---
 
