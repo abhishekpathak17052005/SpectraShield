@@ -645,7 +645,7 @@ export const EmailIntelligencePage: React.FC<EmailIntelligencePageProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 self-start sm:self-center">
-                  <div className="px-3.5 py-1.5 rounded-lg bg-black/40 border border-border font-mono text-xs text-text-secondary flex items-center gap-2">
+                  <div className="px-3.5 py-1.5 rounded-lg bg-surface-muted border border-border font-mono text-xs text-text-secondary flex items-center gap-2">
                     <span className="text-text-muted text-[11px] uppercase tracking-wider">Elapsed:</span>
                     <span className="text-accent font-semibold">{analysisElapsed.toFixed(1)}s</span>
                   </div>

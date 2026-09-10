@@ -126,14 +126,28 @@ def test_phase4_api_endpoints():
 
     client = TestClient(app)
 
-    # 1. Test CSV IOC Export API
-    csv_resp = client.get("/api/forensics/export/sample-phase4-case/csv?defang=true")
+    # First, create an actual case to test export with
+    create_resp = client.post("/api/forensics/analyze-email", json={
+        "platform": "gmail",
+        "subject": "Test Email",
+        "sender": {"name": "Test Sender", "email": "test@example.com"},
+        "recipient": "user@test.com",
+        "body": "Test body",
+        "urls": [],
+        "timestamp": "2026-01-01T00:00:00Z"
+    })
+    assert create_resp.status_code == 200
+    case_data = create_resp.json()
+    case_id = case_data.get("case_id")
+    assert case_id is not None
+
+    # 1. Test CSV IOC Export API with real case
+    csv_resp = client.get(f"/api/forensics/export/{case_id}/csv?defang=true")
     assert csv_resp.status_code == 200
     assert "text/csv" in csv_resp.headers["content-type"]
     assert "attachment; filename=" in csv_resp.headers["content-disposition"]
     csv_text = csv_resp.text
     assert "IOC_Type,IOC_Value" in csv_text or "ioc_type,defanged_value" in csv_text
-    assert "185[.]220[.]101[.]5" in csv_text
 
     # 2. Test analyze-email with homoglyph sender
     homoglyph_eml = (

@@ -1044,66 +1044,11 @@ def export_case_pdf(case_id: str, redact_pii: bool = False):
     
     analysis = evidence_vault.get_analysis(case_id)
     if not analysis:
-        # Generate sample analysis if case not found to support direct testing
-        analysis = {
-            "case_id": case_id,
-            "email_metadata": {
-                "sender": "finance-alert@microsoft-billing.top",
-                "recipient": "accounting@company.com",
-                "subject": "URGENT: Wire Transfer Required - Finance Department",
-                "timestamp": "2024-01-15T14:32:00Z",
-                "message_id": "<20240115143200.ABC@microsoft-billing.top>",
-                "hash_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-            },
-            "final_risk": 89.5,
-            "verdict": "MALICIOUS",
-            "threat_category": "Business Email Compromise",
-            "confidence": 92,
-            "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
-            "why_flagged": [
-                "dmarc_fail",
-                "tor_detected",
-                "urgency_trigger",
-                "request_credentials",
-                "unusual_sender_domain"
-            ],
-            "authentication": {
-                "spf": {"status": "fail", "domain": "microsoft-billing.top", "details": "IP not authorized"},
-                "dkim": {"status": "invalid", "domain": "microsoft-billing.top", "details": "No valid key"},
-                "dmarc": {"status": "fail", "domain": "microsoft-billing.top", "policy": "reject", "details": "Unaligned"}
-            },
-            "relay_hops": [
-                {
-                    "hop_number": 1,
-                    "timestamp": "2024-01-15T14:31:00Z",
-                    "ip": "185.220.101.5",
-                    "organization": "Tor Exit Node",
-                    "country": "Germany",
-                    "city": "Frankfurt",
-                    "is_private": False,
-                    "is_origin": True,
-                    "anonymization_type": "tor"
-                }
-            ],
-            "originating_node": {
-                "ip": "185.220.101.5",
-                "organization": "Tor Exit Node",
-                "asn": "AS60729",
-                "country": "Germany",
-                "city": "Frankfurt",
-                "is_private": False,
-                "anonymization_type": "tor",
-                "vpn_provider": "Tor Network",
-                "abuse_confidence": 95,
-                "threat_reports": 234
-            },
-            "campaign": {
-                "id": "CAMP-2026-BEC-M365",
-                "name": "Targeted European Wire Diversion",
-                "attribution_confidence": 92.0,
-                "historical_count": 847
-            }
-        }
+        # Case not found - return error instead of fabricating data
+        raise HTTPException(
+            status_code=404,
+            detail=f"Case {case_id} not found in evidence vault. Cannot generate PDF for non-existent case."
+        )
 
     # Generate PDF using new SpectraShield 2.0 PDF generator
     redaction_level = "standard" if redact_pii else None
@@ -1129,12 +1074,12 @@ def export_case_pdf(case_id: str, redact_pii: bool = False):
         metadata={
             "redacted_pii": redact_pii,
             "pdf_generator": "SpectraShield2.0",
-            "pages": metadata.get('pages', 7),
+            "pages": metadata.get('pages', 1),
             "validation_warnings": len(metadata.get('validation_warnings', []))
         }
     )
 
-    filename = f"SpectraShield_Forensic_Dossier_{case_id[:8]}{'_redacted' if redact_pii else ''}.pdf"
+    filename = f"SpectraShield_Dossier_{case_id[:12]}{'_redacted' if redact_pii else ''}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -1151,40 +1096,11 @@ def export_case_stix(case_id: str, redact_pii: bool = False):
     
     analysis = evidence_vault.get_analysis(case_id)
     if not analysis:
-        # Fallback sample analysis for direct testing
-        analysis = {
-            "case_id": case_id,
-            "threat_category": "Business Email Compromise",
-            "final_risk": 89.5,
-            "verdict": "MALICIOUS",
-            "confidence": 92,
-            "originating_node": {
-                "ip": "185.220.101.5",
-                "organization": "Tor Exit Node",
-                "asn": "AS60729",
-                "abuse_confidence": 95,
-                "threat_reports": 234
-            },
-            "authentication": {
-                "spf": {"domain": "microsoft-billing-2024.net", "status": "fail"},
-                "dkim": {"domain": "microsoft-billing-2024.net", "status": "invalid"},
-                "dmarc": {"domain": "microsoft-billing-2024.net", "status": "fail"}
-            },
-            "campaign": {
-                "id": "CAMP-2026-M365",
-                "name": "Targeted Wire Diversion Campaign",
-                "attribution_confidence": 92.0,
-                "related_indicators": [
-                    "microsoft-billing-2024.net",
-                    "185.220.101.5",
-                    "AS60729"
-                ],
-                "ttps": [
-                    "T1566.002: Phishing - Spearphishing Link",
-                    "T1598.003: Phishing for Information"
-                ]
-            }
-        }
+        # Case not found - return error instead of fabricating data
+        raise HTTPException(
+            status_code=404,
+            detail=f"Case {case_id} not found in evidence vault. Cannot export STIX for non-existent case."
+        )
 
     # Generate STIX using new exporter
     stix_json = export_forensic_to_stix(case_id, analysis)
@@ -1208,37 +1124,11 @@ def export_case_csv(case_id: str, defang: bool = True):
     
     analysis = evidence_vault.get_analysis(case_id)
     if not analysis:
-        # Fallback sample analysis for direct testing
-        analysis = {
-            "case_id": case_id,
-            "threat_category": "Business Email Compromise",
-            "final_risk": 89.5,
-            "confidence": 92,
-            "email_metadata": {
-                "sender": "finance@microsoft-billing-2024.net",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "originating_node": {
-                "ip": "185.220.101.5",
-                "organization": "Tor Exit Node",
-                "asn": "AS60729",
-                "country": "Germany",
-                "abuse_confidence": 95,
-                "threat_reports": 234
-            },
-            "authentication": {
-                "spf": {"domain": "microsoft-billing-2024.net", "status": "fail"},
-                "dkim": {"domain": "microsoft-billing-2024.net", "status": "invalid"},
-                "dmarc": {"domain": "microsoft-billing-2024.net", "status": "fail"}
-            },
-            "campaign": {
-                "related_indicators": [
-                    "185.220.101.5",
-                    "AS60729",
-                    "microsoft-billing-2024.net"
-                ]
-            }
-        }
+        # Case not found - return error instead of fabricating data
+        raise HTTPException(
+            status_code=404,
+            detail=f"Case {case_id} not found in evidence vault. Cannot export CSV for non-existent case."
+        )
 
     # Generate CSV using new exporter
     csv_content = export_forensic_to_csv(case_id, analysis, defang=defang)
